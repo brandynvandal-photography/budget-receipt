@@ -2,129 +2,204 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="theme-color" content="#f9f9f7" media="(prefers-color-scheme: light)" />
+<meta name="theme-color" content="#0d0d0d" media="(prefers-color-scheme: dark)" />
 <meta name="robots" content="noindex" />
 <title>Budget Receipt</title>
 <style>
+/* Budget Receipt v2 — clean & modern, dataviz reference tokens.
+   Surfaces/ink/status from the validated reference palette. */
 :root{
-  --paper:#f7f4ec; --ink:#1c1a17; --faint:#6b665c; --line:#cfc8b8;
-  --green:#1f7a4d; --greenbg:#e4f2e8; --amber:#a9741a; --amberbg:#f7edda;
-  --red:#b23b3b; --redbg:#f6e2e2; --accent:#1c1a17;
+  --page:#f9f9f7; --surface:#fcfcfb;
+  --ink:#0b0b0b; --ink2:#52514e; --muted:#898781;
+  --grid:#e1e0d9; --baseline:#c3c2b7; --ring:rgba(11,11,11,.10);
+  --accent:#2a78d6; --accent-soft:#cde2fb; --accent-deep:#1c5cab;
+  --good:#0ca30c; --good-text:#006300; --warn:#fab219; --serious:#ec835a; --crit:#d03b3b;
+  --neg:#e34948; /* diverging red pole */
+  --good-bg:#e3f3e3; --warn-bg:#fdf0d3; --crit-bg:#fae3e3;
+  --radius:14px;
 }
 @media (prefers-color-scheme: dark){
-  :root{ --paper:#1a1917; --ink:#ece7db; --faint:#9a9384; --line:#3a372f;
-    --greenbg:#16281f; --amberbg:#2a2415; --redbg:#2c1a1a; }
+  :root{
+    --page:#0d0d0d; --surface:#1a1a19;
+    --ink:#ffffff; --ink2:#c3c2b7; --muted:#898781;
+    --grid:#2c2c2a; --baseline:#383835; --ring:rgba(255,255,255,.10);
+    --accent:#3987e5; --accent-soft:#184f95; --accent-deep:#86b6ef;
+    --good-bg:#143318; --warn-bg:#3a2f10; --crit-bg:#3a1717;
+    --good-text:#0ca30c; --neg:#e66767;
+  }
 }
-*{box-sizing:border-box}
-html,body{margin:0;background:#2a2824;color:var(--ink);
-  font-family:ui-monospace,"SFMono-Regular",Menlo,Consolas,monospace;-webkit-text-size-adjust:100%}
-.mono{font-family:ui-monospace,Menlo,Consolas,monospace}
-.small{font-size:12px;color:var(--faint);line-height:1.45}
-.tiny{font-size:11px;color:var(--faint)}
-.boot{padding:40px;text-align:center;color:#aaa}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--page);color:var(--ink);
+  font-family:system-ui,-apple-system,"Segoe UI",sans-serif;
+  font-size:16px;line-height:1.45;-webkit-text-size-adjust:100%}
+button,input,select{font-family:inherit;font-size:inherit;color:inherit}
+.boot{padding:48px 16px;text-align:center;color:var(--muted)}
 
-.paper{max-width:460px;margin:0 auto;min-height:100vh;background:var(--paper);
-  padding:14px 16px 90px;box-shadow:0 0 30px rgba(0,0,0,.4);
-  background-image:repeating-linear-gradient(0deg,transparent,transparent 27px,rgba(0,0,0,.02) 28px)}
+.shell{max-width:480px;margin:0 auto;min-height:100vh;padding:0 16px 96px}
 
-.head{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;padding-bottom:6px}
-.brand{font-size:11px;line-height:1.25;letter-spacing:.5px;white-space:pre}
-.monthpick select{font-family:inherit;background:transparent;color:var(--ink);border:1px solid var(--line);
-  border-radius:6px;padding:4px 6px}
+/* header: tiny receipt nod + month picker */
+.top{display:flex;justify-content:space-between;align-items:center;padding:14px 0 4px}
+.logo{font-size:13px;font-weight:700;letter-spacing:.14em;color:var(--ink2)}
+.logo .scissor{color:var(--muted);font-weight:400}
+.monthchip{border:1px solid var(--ring);background:var(--surface);border-radius:999px;
+  padding:6px 12px;font-size:14px;font-weight:600;color:var(--ink)}
+.monthchip select{border:none;background:transparent;font-weight:600;outline:none;-webkit-appearance:none;appearance:none}
 
-.tabs{display:flex;gap:4px;flex-wrap:wrap;border-top:1px dashed var(--line);
-  border-bottom:1px dashed var(--line);padding:8px 0;margin:4px 0 10px}
-.tab{position:relative;flex:1;min-width:60px;background:transparent;border:none;color:var(--faint);
-  font-family:inherit;font-size:12px;padding:6px 4px;cursor:pointer;border-radius:6px}
-.tab.on{background:var(--ink);color:var(--paper);font-weight:600}
-.dot{position:absolute;top:3px;right:6px;width:7px;height:7px;border-radius:50%;background:var(--amber)}
+h2.screen-title{font-size:22px;font-weight:700;margin:14px 0 2px}
+.screen-sub{font-size:14px;color:var(--ink2);margin:0 0 14px}
 
-.screen{display:flex;flex-direction:column;gap:12px}
-.card{border:1px dashed var(--line);border-radius:10px;padding:12px}
-.cardhead{display:flex;justify-content:space-between;align-items:baseline;font-weight:600;font-size:13px;margin-bottom:6px}
-.big{font-size:16px}.huge{font-size:44px;font-weight:700;line-height:1}
-.unit{font-size:15px;color:var(--faint);font-weight:400}
-.greencard{background:var(--greenbg);border-color:var(--green)}
-.ambercard{background:var(--amberbg);border-color:var(--amber)}
-.redcard{background:var(--redbg);border-color:var(--red)}
+/* cards */
+.card{background:var(--surface);border:1px solid var(--ring);border-radius:var(--radius);
+  padding:16px;margin-bottom:12px}
+.card h3{margin:0 0 2px;font-size:13px;font-weight:600;color:var(--ink2);letter-spacing:.01em}
+.card .sub{font-size:13px;color:var(--muted);margin-top:2px}
 
-.hero{border-radius:12px;padding:16px;text-align:center;border:2px solid var(--green);background:var(--greenbg)}
-.hero.danger{border-color:var(--red);background:var(--redbg)}
-.hero.okc{border-color:var(--green);background:var(--greenbg)}
-.hero .huge{margin:6px 0}
-.flag{margin-top:8px;font-size:12px;font-weight:700;color:var(--red)}
-.okc .flag{color:var(--green)}
+/* hero */
+.hero-val{font-size:46px;font-weight:700;line-height:1.05;letter-spacing:-.02em;margin:4px 0 2px}
+.hero-val.overspent{color:var(--crit)}
+.hero-cap{font-size:14px;color:var(--ink2)}
+.want-rows{margin-top:12px;border-top:1px solid var(--grid);padding-top:4px}
 
-.envrow{padding:6px 0;border-top:1px dotted var(--line)}
-.envrow:first-of-type{border-top:none}
-.envtop{display:flex;justify-content:space-between;font-size:12px;align-items:center}
-.envbot{margin-top:3px}
-.bar{height:8px;background:rgba(0,0,0,.08);border-radius:5px;overflow:hidden;margin:5px 0}
-.barfill{height:100%;border-radius:5px}
-.barfill.green{background:var(--green)}.barfill.amber{background:var(--amber)}.barfill.red{background:var(--red)}
-.neg{color:var(--red)}
+/* meter (fill = severity, track = light step of same ramp) */
+.meter{height:6px;border-radius:4px;background:var(--accent-soft);overflow:hidden;margin:6px 0 2px}
+.meter.warn-track{background:var(--warn-bg)}
+.meter.crit-track{background:var(--crit-bg)}
+.meter > i{display:block;height:100%;border-radius:4px;background:var(--accent)}
+.meter.warn-track > i{background:var(--warn)}
+.meter.crit-track > i{background:var(--crit)}
 
-.strip{display:flex;gap:6px;overflow-x:auto;padding-bottom:2px}
-.chip{flex:0 0 auto;border:1px solid var(--line);background:transparent;border-radius:8px;
-  padding:6px 8px;cursor:pointer;text-align:center;color:var(--ink)}
-.chip.green{border-color:var(--green)}.chip.red{border-color:var(--red)}
-.chip.red .mono{color:var(--red)}.chip.green .mono{color:var(--green)}
-.chip.sel{background:var(--ink)}.chip.sel .mono{color:var(--paper)}
+/* envelope / list rows */
+.row{padding:12px 0;border-top:1px solid var(--grid)}
+.row:first-of-type{border-top:none}
+.row-line{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+.row-name{font-size:15px;font-weight:600;display:flex;align-items:center;gap:8px;min-width:0}
+.row-name .ic{font-size:17px}
+.row-amt{font-size:15px;font-weight:700;white-space:nowrap}
+.row-amt small{font-weight:500;color:var(--muted);font-size:12px}
+.row-meta{font-size:12.5px;color:var(--muted);margin-top:2px;display:flex;gap:8px;align-items:center}
+.tag{font-size:11.5px;font-weight:700;padding:1px 8px;border-radius:999px}
+.tag.over{background:var(--crit-bg);color:var(--crit)}
+.tag.close{background:var(--warn-bg);color:#8a5f00}
+@media (prefers-color-scheme: dark){ .tag.close{color:var(--warn)} }
+.tag.ok{background:var(--good-bg);color:var(--good-text)}
 
-.link{background:none;border:none;color:var(--ink);text-decoration:underline;font-family:inherit;
-  font-size:12px;padding:2px 0;cursor:pointer}
+/* stat tiles */
+.tiles{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px}
+.tile{background:var(--surface);border:1px solid var(--ring);border-radius:var(--radius);padding:12px}
+.tile .t-label{font-size:11.5px;font-weight:600;color:var(--ink2)}
+.tile .t-val{font-size:19px;font-weight:700;margin-top:2px;letter-spacing:-.01em}
+.tile .t-cap{font-size:11px;color:var(--muted);margin-top:1px}
+.t-val.pos{color:var(--good-text)}.t-val.negv{color:var(--crit)}
 
-.txn{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 0;
-  border-top:1px dotted var(--line);font-size:12px}
-.txn:first-of-type{border-top:none}
-.txn.uncat{background:var(--amberbg);margin:0 -6px;padding:7px 6px;border-radius:6px;border-top:none}
-.txnl{display:flex;gap:8px;align-items:center;min-width:0}
-.tdate{color:var(--faint);flex:0 0 auto}
-.tmerch{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.badge{margin-left:6px;font-size:9px;background:var(--amber);color:#fff;padding:1px 5px;border-radius:4px;letter-spacing:.5px}
-.txnr{display:flex;gap:8px;align-items:center;flex:0 0 auto}
-.tamt{font-weight:600}
-.recat{font-family:inherit;font-size:11px;max-width:120px;background:transparent;color:var(--ink);
-  border:1px solid var(--line);border-radius:5px;padding:2px}
+/* attention list */
+.attn{display:flex;align-items:center;gap:10px;width:100%;text-align:left;background:none;border:none;
+  padding:12px 0;border-top:1px solid var(--grid);cursor:pointer}
+.attn:first-of-type{border-top:none}
+.attn .a-ic{width:30px;height:30px;border-radius:9px;display:flex;align-items:center;justify-content:center;
+  font-size:15px;flex:0 0 auto}
+.attn .a-ic.warn{background:var(--warn-bg)}
+.attn .a-ic.crit{background:var(--crit-bg)}
+.attn .a-ic.good{background:var(--good-bg)}
+.attn .a-tx{flex:1;min-width:0}
+.attn .a-title{font-size:14.5px;font-weight:600}
+.attn .a-sub{font-size:12.5px;color:var(--muted)}
+.attn .chev{color:var(--muted);font-size:18px}
 
-.addgrid{display:grid;grid-template-columns:1fr 1fr;gap:6px}
-.addgrid input,.addgrid select{font-family:inherit;font-size:12px;padding:6px;border:1px solid var(--line);
-  border-radius:6px;background:var(--paper);color:var(--ink)}
-.addgrid .add{grid-column:1 / -1;background:var(--ink);color:var(--paper);border:none;padding:9px;
-  border-radius:7px;font-family:inherit;cursor:pointer;font-weight:600}
-.hint{margin-top:5px}
+/* afford check */
+.afford-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
+.afford-grid input,.afford-grid select{border:1px solid var(--ring);border-radius:10px;padding:11px 12px;
+  background:var(--page);font-size:15px;min-width:0}
+.verdict{margin-top:10px;border-radius:10px;padding:10px 12px;font-size:14px;display:flex;gap:9px;align-items:flex-start}
+.verdict .v-ic{font-size:16px;line-height:1.3}
+.verdict.green{background:var(--good-bg);color:var(--good-text)}
+.verdict.amber{background:var(--warn-bg);color:#7a5400}
+@media (prefers-color-scheme: dark){ .verdict.amber{color:var(--warn)} }
+.verdict.red{background:var(--crit-bg);color:var(--crit)}
+.verdict b{display:block;font-size:14px}
+.verdict .v-sub{font-size:12.5px;opacity:.85;margin-top:1px}
 
-.num{width:64px;font-family:inherit;text-align:right;border:1px solid var(--line);border-radius:5px;
-  padding:2px 4px;background:var(--paper);color:var(--ink)}
-.planwrap{display:flex;align-items:center;gap:2px}
+/* chart */
+.chart-wrap{margin-top:8px}
+.chart-note{font-size:12px;color:var(--muted);margin-top:6px}
 
-.radio{display:block;font-size:12px;padding:4px 0;cursor:pointer}
-.block{display:block;font-size:12px;margin:8px 0}
-.btnrow{display:flex;flex-wrap:wrap;gap:8px}
-.btnrow button,.filebtn{font-family:inherit;font-size:12px;padding:8px 10px;border-radius:7px;
-  border:1px solid var(--ink);background:var(--ink);color:var(--paper);cursor:pointer}
-.btnrow .ghost{background:transparent;color:var(--ink)}
-.filebtn{background:transparent;color:var(--ink);border:1px solid var(--ink)}
+/* transactions */
+.seg{display:flex;background:var(--page);border:1px solid var(--ring);border-radius:11px;padding:3px;margin-bottom:12px}
+.seg button{flex:1;border:none;background:transparent;padding:8px 4px;border-radius:8px;font-size:13.5px;
+  font-weight:600;color:var(--ink2);cursor:pointer}
+.seg button.on{background:var(--surface);color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.09)}
+.txrow{display:flex;align-items:center;gap:10px;padding:11px 0;border-top:1px solid var(--grid)}
+.txrow:first-of-type{border-top:none}
+.txrow .tx-main{flex:1;min-width:0}
+.txrow .tx-merch{font-size:14.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.txrow .tx-date{font-size:12px;color:var(--muted)}
+.txrow .tx-amt{font-size:15px;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
+.tx-amt.refund{color:var(--good-text)}
+.txrow.uncat{position:relative;padding-left:12px}
+.txrow.uncat::before{content:"";position:absolute;left:0;top:12px;bottom:12px;width:3px;border-radius:2px;background:var(--warn)}
+.catpick{border:1px solid var(--ring);border-radius:9px;padding:6px 8px;font-size:12.5px;background:var(--page);
+  max-width:128px;color:var(--ink2)}
+.uncat .catpick{border-color:var(--warn);color:var(--ink);font-weight:600}
 
-.testrow{display:flex;gap:8px;font-size:11px;padding:2px 0;align-items:flex-start}
-.testrow.ok span:first-child{color:var(--green)}
-.testrow.fail{color:var(--red);font-weight:700}
-.err{white-space:pre-wrap;color:var(--red);font-size:11px}
+/* add form */
+.addbtn{position:fixed;right:max(16px, calc(50% - 224px));bottom:86px;width:54px;height:54px;border-radius:50%;
+  background:var(--accent);color:#fff;border:none;font-size:28px;font-weight:400;line-height:1;
+  box-shadow:0 4px 14px rgba(0,0,0,.22);cursor:pointer;z-index:30}
+.sheet-bg{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:40}
+.sheet{position:fixed;left:0;right:0;bottom:0;z-index:41;background:var(--surface);
+  border-radius:18px 18px 0 0;padding:18px 16px calc(20px + env(safe-area-inset-bottom));max-width:480px;margin:0 auto}
+.sheet h3{margin:0 0 12px;font-size:17px;font-weight:700;color:var(--ink)}
+.sheet .f-grid{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.sheet input,.sheet select{border:1px solid var(--ring);border-radius:10px;padding:12px;background:var(--page);font-size:15px;min-width:0}
+.sheet .full{grid-column:1/-1}
+.sheet .save{grid-column:1/-1;background:var(--accent);color:#fff;border:none;border-radius:11px;
+  padding:14px;font-size:15.5px;font-weight:700;cursor:pointer}
+.sheet .hint{font-size:12.5px;color:var(--muted);margin-top:8px}
 
-.foot{margin-top:16px;text-align:center;font-size:10px;color:var(--faint);
-  border-top:1px dashed var(--line);padding-top:10px}
-button{-webkit-tap-highlight-color:transparent}
+/* funds */
+.fund-actions{display:flex;gap:8px;margin-top:10px}
+.fund-actions input{flex:1;border:1px solid var(--ring);border-radius:10px;padding:10px 12px;background:var(--page);font-size:15px;min-width:0}
+.btn{border:none;border-radius:10px;padding:10px 14px;font-size:14px;font-weight:600;cursor:pointer}
+.btn.primary{background:var(--accent);color:#fff}
+.btn.quiet{background:var(--page);border:1px solid var(--ring);color:var(--ink)}
+.btn.danger-quiet{background:var(--page);border:1px solid var(--ring);color:var(--crit)}
 
-/* v1 additions */
-.bold{font-weight:700;text-decoration:none}
-.pos{color:var(--green)}
-.selfc{align-self:center;padding:0 4px}
-.fundrow{display:flex;gap:6px;margin-top:8px;align-items:center}
-.num.wide{width:96px;padding:6px 4px}
-.mini{font-family:inherit;font-size:11px;padding:7px 9px;border-radius:6px;border:1px solid var(--ink);
-  background:var(--ink);color:var(--paper);cursor:pointer}
-.mini.ghost{background:transparent;color:var(--ink)}
-.verdict{margin-top:8px;line-height:1.5}
+/* settings */
+.opt{display:flex;gap:10px;align-items:flex-start;padding:11px 0;border-top:1px solid var(--grid);cursor:pointer}
+.opt:first-of-type{border-top:none}
+.opt input{margin-top:4px}
+.opt .o-title{font-size:14.5px;font-weight:600}
+.opt .o-sub{font-size:12.5px;color:var(--muted)}
+.field{display:flex;justify-content:space-between;align-items:center;padding:11px 0;border-top:1px solid var(--grid)}
+.field:first-of-type{border-top:none}
+.field label{font-size:14.5px;font-weight:600}
+.field .f-sub{display:block;font-size:12px;color:var(--muted);font-weight:400}
+.field input{width:110px;text-align:right;border:1px solid var(--ring);border-radius:9px;padding:9px 10px;
+  background:var(--page);font-size:15px;font-variant-numeric:tabular-nums}
+.btn-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.filelabel{display:inline-block}
+.selfcheck{font-size:14px;margin-top:8px}
+.selfcheck .fails{color:var(--crit);font-size:12.5px;white-space:pre-wrap}
+
+/* bottom tab bar */
+.tabbar{position:fixed;left:0;right:0;bottom:0;z-index:20;background:var(--surface);
+  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-top:1px solid var(--ring)}
+.tabbar-inner{max-width:480px;margin:0 auto;display:flex;padding:6px 8px calc(8px + env(safe-area-inset-bottom))}
+.tb{flex:1;background:none;border:none;display:flex;flex-direction:column;align-items:center;gap:2px;
+  padding:6px 0 2px;cursor:pointer;color:var(--muted);position:relative}
+.tb .tb-ic{font-size:20px;line-height:1}
+.tb .tb-label{font-size:10.5px;font-weight:600}
+.tb.on{color:var(--accent)}
+.tb .dot{position:absolute;top:2px;right:calc(50% - 16px);width:8px;height:8px;border-radius:50%;
+  background:var(--warn);border:2px solid var(--surface)}
+
+.empty{padding:28px 8px;text-align:center;color:var(--ink2);font-size:14.5px}
+.empty .e-ic{font-size:30px;display:block;margin-bottom:8px}
+.footnote{text-align:center;font-size:11.5px;color:var(--muted);padding:14px 0 4px}
+.err{white-space:pre-wrap;color:var(--crit);font-size:13px}
 
 </style>
 </head>
@@ -1042,6 +1117,18 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
   }
   const TODAY = todayISO();
   const CURRENT_MONTH = TODAY.slice(0, 7);
+  const money = (cents) => C.fmt(cents);
+  function fmt0(cents) {
+    const n = Math.round(Math.abs(cents) / 100).toLocaleString("en-US");
+    return (cents < 0 ? "-$" : "$") + n;
+  }
+  const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+  function monthLabel(m) {
+    return MONTH_NAMES[+m.slice(5, 7) - 1];
+  }
+  function monthShort(m) {
+    return MONTH_NAMES[+m.slice(5, 7) - 1].slice(0, 3);
+  }
   class Boundary extends Component {
     constructor(p) {
       super(p);
@@ -1052,29 +1139,14 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
     }
     render() {
       if (this.state.err) {
-        return /* @__PURE__ */ React.createElement("div", { className: "paper" }, /* @__PURE__ */ React.createElement("h1", null, "\u259A receipt torn \u259A"), /* @__PURE__ */ React.createElement("p", { className: "mono" }, "Couldn't render. Your saved data was not touched."), /* @__PURE__ */ React.createElement("pre", { className: "err" }, String(this.state.err)), /* @__PURE__ */ React.createElement("button", { onClick: () => this.setState({ err: null }) }, "Try again"));
+        return /* @__PURE__ */ React.createElement("div", { className: "shell" }, /* @__PURE__ */ React.createElement("div", { className: "card", style: { marginTop: 24 } }, /* @__PURE__ */ React.createElement("h3", null, "Something went wrong"), /* @__PURE__ */ React.createElement("div", { className: "sub" }, "Your saved data was not touched."), /* @__PURE__ */ React.createElement("pre", { className: "err" }, String(this.state.err)), /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: () => this.setState({ err: null }) }, "Try again")));
       }
       return this.props.children;
     }
   }
-  const money = (cents) => C.fmt(cents);
-  function pctUsed(spent, planned) {
-    return planned > 0 ? spent / planned : spent > 0 ? 1 : 0;
-  }
-  function barColor(p) {
-    return p >= 1 ? "red" : p >= 0.8 ? "amber" : "green";
-  }
-  function runwayLabel(m) {
-    return m === Infinity ? "\u221E" : m.toFixed(1);
-  }
-  function Bar({ spent, planned }) {
-    const p = pctUsed(spent, planned);
-    const w = Math.max(0, Math.min(1, p)) * 100;
-    return /* @__PURE__ */ React.createElement("div", { className: "bar" }, /* @__PURE__ */ React.createElement("div", { className: "barfill " + barColor(p), style: { width: w + "%" } }));
-  }
   function App() {
     const [data, setDataRaw] = useState(null);
-    const [tab, setTab] = useState("dash");
+    const [tab, setTab] = useState("home");
     const [rev, setRev] = useState(0);
     const saveTimer = useRef(null);
     useEffect(() => {
@@ -1101,11 +1173,12 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
         return next;
       });
     }, []);
-    if (data === null) return /* @__PURE__ */ React.createElement("div", { className: "paper" }, /* @__PURE__ */ React.createElement("div", { className: "boot mono" }, "reading saved data\u2026"));
+    if (data === null) return /* @__PURE__ */ React.createElement("div", { className: "shell" }, /* @__PURE__ */ React.createElement("div", { className: "boot" }, "opening your budget\u2026"));
     return /* @__PURE__ */ React.createElement(Main, { ...{ data, setData, tab, setTab, rev, setRev } });
   }
   function Main({ data, setData, tab, setTab, rev, setRev }) {
     const { categories, txns, income, settings, overrides, sinkingFunds } = data;
+    const [sheetOpen, setSheetOpen] = useState(false);
     const dataMonths = useMemo(() => C.monthsWithData(income, txns), [income, txns]);
     const allMonths = useMemo(() => {
       const set = {};
@@ -1119,10 +1192,7 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
       categories.forEach((c) => m[c.id] = c);
       return m;
     }, [categories]);
-    const completedMonths = useMemo(
-      () => dataMonths.filter((m) => m < CURRENT_MONTH),
-      [dataMonths]
-    );
+    const completedMonths = useMemo(() => dataMonths.filter((m) => m < CURRENT_MONTH), [dataMonths]);
     const statsMonths = completedMonths.length ? completedMonths : dataMonths;
     const deposits = useMemo(
       () => statsMonths.map((m) => ({ month: m, cents: C.monthIncome(income, m) })).filter((d) => d.cents > 0),
@@ -1142,8 +1212,7 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
       const months3 = C.trailingMonths(statsMonths, asOf, 3);
       const weights = {};
       categories.forEach((cat) => {
-        const avg = months3.length ? Math.round(months3.reduce((s, m) => s + C.spentForEnvelope(txns, m, cat.id), 0) / months3.length) : 0;
-        weights[cat.id] = avg;
+        weights[cat.id] = months3.length ? Math.round(months3.reduce((s, m) => s + C.spentForEnvelope(txns, m, cat.id), 0) / months3.length) : 0;
       });
       const ratios = runway >= settings.targetRunway ? { need: 0.5, want: 0.3, save: 0.2 } : { need: 0.55, want: 0.25, save: 0.2 };
       return { alloc: C.allocate(baseline.value, ratios, categories, weights), ratios };
@@ -1153,15 +1222,12 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
       if (o && o[catId] != null) return o[catId];
       return suggestions.alloc[catId] || 0;
     }, [overrides, month, suggestions]);
-    const plannedTotal = useMemo(
-      () => categories.reduce((s, cat) => s + planned(cat.id), 0),
-      [categories, planned]
-    );
-    const unassigned = baseline.value - plannedTotal;
     const monthIncomeC = C.monthIncome(income, month);
     const monthSpendC = C.monthSpend(txns, month);
     const monthNet = monthIncomeC - monthSpendC;
     const uncat = C.uncategorizedTotal(txns, month);
+    const plannedTotal = categories.reduce((s, cat) => s + planned(cat.id), 0);
+    const unassigned = baseline.value - plannedTotal;
     const setPlanned = (catId, str) => {
       const cents = C.parseDollars(str);
       if (cents == null) return;
@@ -1174,30 +1240,24 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
     const addTxn = (t) => {
       const cents = C.parseDollars(t.amount);
       if (cents == null || !t.date) return false;
-      setData((d) => ({
-        ...d,
-        txns: [...d.txns, {
-          id: "t" + Date.now() + Math.floor(Math.random() * 1e4),
-          date: t.date,
-          amount: cents,
-          categoryId: t.categoryId || null,
-          merchant: t.merchant || ""
-        }]
-      }));
+      setData((d) => ({ ...d, txns: [...d.txns, {
+        id: "t" + Date.now() + Math.floor(Math.random() * 1e4),
+        date: t.date,
+        amount: cents,
+        categoryId: t.categoryId || null,
+        merchant: t.merchant || ""
+      }] }));
       return true;
     };
     const addIncome = (t) => {
       const cents = C.parseDollars(t.amount);
       if (cents == null || cents <= 0 || !t.date) return false;
-      setData((d) => ({
-        ...d,
-        income: [...d.income, {
-          id: "i" + Date.now() + Math.floor(Math.random() * 1e4),
-          date: t.date,
-          amount: cents,
-          source: t.merchant || "Deposit"
-        }]
-      }));
+      setData((d) => ({ ...d, income: [...d.income, {
+        id: "i" + Date.now() + Math.floor(Math.random() * 1e4),
+        date: t.date,
+        amount: cents,
+        source: t.merchant || "Deposit"
+      }] }));
       return true;
     };
     const recategorize = (txnId, catId) => setData((d) => ({
@@ -1208,10 +1268,7 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
     const adjustFund = (fundId, str, sign) => {
       const cents = C.parseDollars(str);
       if (cents == null || cents <= 0) return;
-      setData((d) => ({
-        ...d,
-        sinkingFunds: d.sinkingFunds.map((f) => f.id === fundId ? { ...f, balance: Math.max(0, f.balance + sign * cents) } : f)
-      }));
+      setData((d) => ({ ...d, sinkingFunds: d.sinkingFunds.map((f) => f.id === fundId ? { ...f, balance: Math.max(0, f.balance + sign * cents) } : f) }));
     };
     const exportJSON = () => {
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
@@ -1240,212 +1297,367 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
       setData(freshData());
       setRev((n) => n + 1);
     };
-    const tabs = [
-      ["dash", "Dash"],
-      ["budget", "Budget"],
-      ["txns", "Txns"],
-      ["funds", "Funds"],
-      ["calc", "Calc"],
-      ["settings", "Set"],
-      ["tests", "Tests"]
+    const shared = {
+      categories,
+      catById,
+      txns,
+      income,
+      settings,
+      sinkingFunds,
+      month,
+      setMonth,
+      allMonths,
+      dataMonths,
+      planned,
+      setPlanned,
+      baseline,
+      burn,
+      runway,
+      monthIncomeC,
+      monthSpendC,
+      monthNet,
+      uncat,
+      unassigned,
+      suggestions,
+      setTab,
+      recategorize,
+      adjustFund,
+      rev
+    };
+    const TABS = [
+      ["home", "Home", "\u2302"],
+      ["budget", "Budget", "\u25A6"],
+      ["activity", "Activity", "\u21C5"],
+      ["funds", "Funds", "\u25CD"],
+      ["settings", "Settings", "\u2699"]
     ];
-    return /* @__PURE__ */ React.createElement("div", { className: "paper" }, /* @__PURE__ */ React.createElement(Header, { month, months: allMonths, setMonth }), /* @__PURE__ */ React.createElement("nav", { className: "tabs" }, tabs.map(([id, label]) => /* @__PURE__ */ React.createElement("button", { key: id, className: tab === id ? "tab on" : "tab", onClick: () => setTab(id) }, label, id === "txns" && uncat !== 0 ? /* @__PURE__ */ React.createElement("span", { className: "dot" }) : null))), tab === "dash" && /* @__PURE__ */ React.createElement(Dashboard, { ...{
-      month,
-      runway,
-      burn,
-      settings,
-      baseline,
-      monthIncomeC,
-      monthSpendC,
-      monthNet,
-      uncat,
-      income,
-      txns,
-      categories,
-      planned,
-      dataMonths,
-      sinkingFunds,
-      setTab,
-      setMonth
-    } }), tab === "budget" && /* @__PURE__ */ React.createElement(Budget, { ...{ categories, month, txns, planned, setPlanned, unassigned, baseline, suggestions, rev } }), tab === "txns" && /* @__PURE__ */ React.createElement(Transactions, { ...{ txns, income, categories, catById, month, addTxn, addIncome, recategorize } }), tab === "funds" && /* @__PURE__ */ React.createElement(Funds, { ...{ sinkingFunds, catById, adjustFund } }), tab === "calc" && /* @__PURE__ */ React.createElement(Calculators, { ...{ settings, burn, runway, categories, txns, month, planned, baseline, sinkingFunds } }), tab === "settings" && /* @__PURE__ */ React.createElement(Settings, { ...{ settings, baseline, setSetting, exportJSON, importJSON, resetSeed, rev } }), tab === "tests" && /* @__PURE__ */ React.createElement(Tests, null), /* @__PURE__ */ React.createElement("footer", { className: "foot mono" }, "local-first \xB7 integer cents \xB7 totals derived, never stored \xB7 ", STORE.label, STORE.corrupted ? " \xB7 \u26A0 previous save was unreadable \u2014 snapshotted to .bak, started from seed" : ""));
+    return /* @__PURE__ */ React.createElement("div", { className: "shell" }, /* @__PURE__ */ React.createElement("header", { className: "top" }, /* @__PURE__ */ React.createElement("div", { className: "logo" }, "BUDGET ", /* @__PURE__ */ React.createElement("span", { className: "scissor" }, "\u2702"), " RECEIPT"), /* @__PURE__ */ React.createElement("label", { className: "monthchip" }, /* @__PURE__ */ React.createElement("select", { value: month, onChange: (e) => setMonth(e.target.value), "aria-label": "Month" }, allMonths.map((m) => /* @__PURE__ */ React.createElement("option", { key: m, value: m }, monthLabel(m), m === CURRENT_MONTH ? " (now)" : ""))))), tab === "home" && /* @__PURE__ */ React.createElement(Home, { ...shared }), tab === "budget" && /* @__PURE__ */ React.createElement(Budget, { ...shared }), tab === "activity" && /* @__PURE__ */ React.createElement(Activity, { ...shared, openAdd: () => setSheetOpen(true) }), tab === "funds" && /* @__PURE__ */ React.createElement(Funds, { ...shared }), tab === "settings" && /* @__PURE__ */ React.createElement(Settings, { ...shared, ...{ setSetting, exportJSON, importJSON, resetSeed } }), (tab === "home" || tab === "budget" || tab === "activity") && /* @__PURE__ */ React.createElement("button", { className: "addbtn", "aria-label": "Add transaction", onClick: () => setSheetOpen(true) }, "+"), sheetOpen && /* @__PURE__ */ React.createElement(AddSheet, { ...{ month, addTxn, addIncome, categories }, close: () => setSheetOpen(false) }), /* @__PURE__ */ React.createElement("nav", { className: "tabbar" }, /* @__PURE__ */ React.createElement("div", { className: "tabbar-inner" }, TABS.map(([id, label, ic]) => /* @__PURE__ */ React.createElement("button", { key: id, className: "tb" + (tab === id ? " on" : ""), onClick: () => setTab(id) }, /* @__PURE__ */ React.createElement("span", { className: "tb-ic" }, ic), /* @__PURE__ */ React.createElement("span", { className: "tb-label" }, label), id === "activity" && uncat !== 0 ? /* @__PURE__ */ React.createElement("span", { className: "dot" }) : null)))));
   }
-  function Header({ month, months, setMonth }) {
-    return /* @__PURE__ */ React.createElement("header", { className: "head" }, /* @__PURE__ */ React.createElement("div", { className: "brand mono" }, "\u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557", /* @__PURE__ */ React.createElement("br", null), "\u2551  BUDGET  \u2551 RECEIPT", /* @__PURE__ */ React.createElement("br", null), "\u255A\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255D"), /* @__PURE__ */ React.createElement("label", { className: "mono monthpick" }, "month\xA0", /* @__PURE__ */ React.createElement("select", { value: month, onChange: (e) => setMonth(e.target.value) }, months.map((m) => /* @__PURE__ */ React.createElement("option", { key: m, value: m }, m, m === CURRENT_MONTH ? " \xB7" : "")))));
-  }
-  function Dashboard(props) {
+  function Home(p) {
     const {
+      categories,
+      txns,
       month,
-      runway,
-      burn,
+      planned,
       settings,
-      baseline,
+      burn,
+      runway,
+      monthNet,
       monthIncomeC,
       monthSpendC,
-      monthNet,
       uncat,
-      income,
-      txns,
-      categories,
-      planned,
-      dataMonths,
       sinkingFunds,
+      income,
+      dataMonths,
+      setMonth,
       setTab,
-      setMonth
-    } = props;
-    const red = monthNet < 0;
-    const under = runway < settings.targetRunway;
+      baseline
+    } = p;
     const inProgress = month === CURRENT_MONTH;
-    const rows = categories.map((cat) => {
-      const p = planned(cat.id), s = C.spentForEnvelope(txns, month, cat.id);
-      return { cat, planned: p, spent: s, pct: pctUsed(s, p) };
-    }).filter((r) => r.planned > 0).sort((a, b) => b.pct - a.pct).slice(0, 3);
-    const minIncome = C.minIncomeNeeded(
-      categories.map((c) => ({ categoryId: c.id, planned: planned(c.id) })),
-      categories,
-      sinkingFunds
-    );
-    const fundRows = sinkingFunds.map((f) => ({ f, st: C.fundStatus(f, TODAY) }));
-    const nextFund = fundRows.slice().sort((a, b) => {
-      const ad = a.st.monthsUntilDue == null ? 9e9 : a.st.monthsUntilDue;
-      const bd = b.st.monthsUntilDue == null ? 9e9 : b.st.monthsUntilDue;
-      return ad - bd || a.f.balance / a.f.targetBalance - b.f.balance / b.f.targetBalance;
-    })[0];
-    return /* @__PURE__ */ React.createElement("div", { className: "screen" }, /* @__PURE__ */ React.createElement("section", { className: "hero " + (under ? "danger" : "okc") }, /* @__PURE__ */ React.createElement("div", { className: "mono small" }, "RUNWAY \xB7 cushion \xF7 core burn"), /* @__PURE__ */ React.createElement("div", { className: "huge" }, runwayLabel(runway), " ", /* @__PURE__ */ React.createElement("span", { className: "unit" }, "months")), /* @__PURE__ */ React.createElement("div", { className: "mono small" }, "At your core spending (", money(burn), "/mo, NEED trailing-3M), your ", money(settings.liquidCushion), " cushion lasts about ", runwayLabel(runway), " months with no income."), under && /* @__PURE__ */ React.createElement("div", { className: "flag" }, "\u2691 below your ", settings.targetRunway, "-month target")), /* @__PURE__ */ React.createElement("section", { className: "card " + (red ? "redcard" : "greencard") }, /* @__PURE__ */ React.createElement("div", { className: "cardhead" }, /* @__PURE__ */ React.createElement("span", null, "Net \xB7 ", month, inProgress ? " (in progress)" : ""), /* @__PURE__ */ React.createElement("span", { className: "big" }, money(monthNet))), /* @__PURE__ */ React.createElement("div", { className: "mono small" }, "income ", money(monthIncomeC), " \u2212 spend ", money(monthSpendC), inProgress ? " \xB7 month not finished \u2014 not a final number" : ""), red && !inProgress && /* @__PURE__ */ React.createElement("div", { className: "flag" }, "\u2691 deficit month \u2014 spending outran income")), /* @__PURE__ */ React.createElement("section", { className: "card " + (uncat !== 0 ? "ambercard" : "") }, /* @__PURE__ */ React.createElement("div", { className: "cardhead" }, /* @__PURE__ */ React.createElement("span", null, "Uncategorized"), /* @__PURE__ */ React.createElement("span", { className: "big" }, money(uncat))), uncat !== 0 ? /* @__PURE__ */ React.createElement("button", { className: "link", onClick: () => setTab("txns") }, "\u25B8 ", money(uncat), " unlabeled \u2014 tap to fix in one tap") : /* @__PURE__ */ React.createElement("div", { className: "mono small" }, "clean \u2014 every dollar has a home")), /* @__PURE__ */ React.createElement("section", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "cardhead" }, /* @__PURE__ */ React.createElement("span", null, "Safe-to-Budget"), /* @__PURE__ */ React.createElement("span", { className: "big" }, money(baseline.value))), /* @__PURE__ */ React.createElement("div", { className: "mono small" }, "conservative of avg-3M ", money(baseline.avg3), " / trailing-low ", money(baseline.low), ". Essentials floor (incl. fund set-asides): you need \u2265 ", money(minIncome), "/mo.")), nextFund && /* @__PURE__ */ React.createElement("section", { className: "card " + (nextFund.st.onTrack ? "" : "ambercard") }, /* @__PURE__ */ React.createElement("div", { className: "cardhead" }, /* @__PURE__ */ React.createElement("span", null, "Next fund: ", nextFund.f.name), /* @__PURE__ */ React.createElement("span", { className: "big" }, money(nextFund.f.balance), " / ", money(nextFund.f.targetBalance))), /* @__PURE__ */ React.createElement("div", { className: "mono small" }, "set aside ", money(nextFund.st.setAside), "/mo", nextFund.st.monthsUntilDue != null ? nextFund.st.onTrack ? " \xB7 on track for due date" : " \xB7 \u2691 behind \u2014 catch-up " + money(nextFund.st.catchUp) + "/mo" : " \xB7 funded in " + (nextFund.st.monthsUntilFunded === Infinity ? "\u2014" : nextFund.st.monthsUntilFunded + " mo"), " ", /* @__PURE__ */ React.createElement("button", { className: "link", onClick: () => setTab("funds") }, "view funds \u25B8"))), /* @__PURE__ */ React.createElement("section", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "cardhead" }, /* @__PURE__ */ React.createElement("span", null, "Hottest envelopes")), rows.length === 0 && /* @__PURE__ */ React.createElement("div", { className: "mono small" }, "Set a budget to see envelope pace."), rows.map((r) => /* @__PURE__ */ React.createElement("div", { key: r.cat.id, className: "envrow" }, /* @__PURE__ */ React.createElement("div", { className: "envtop mono" }, /* @__PURE__ */ React.createElement("span", null, r.cat.icon, " ", r.cat.name), /* @__PURE__ */ React.createElement("span", null, money(r.spent), " / ", money(r.planned))), /* @__PURE__ */ React.createElement(Bar, { spent: r.spent, planned: r.planned })))), /* @__PURE__ */ React.createElement("section", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "cardhead" }, /* @__PURE__ */ React.createElement("span", null, "Months")), /* @__PURE__ */ React.createElement("div", { className: "strip" }, dataMonths.map((m) => {
-      const net = C.netForMonth(income, txns, m);
-      return /* @__PURE__ */ React.createElement(
-        "button",
-        {
-          key: m,
-          className: "chip " + (net < 0 ? "red" : "green") + (m === month ? " sel" : ""),
-          onClick: () => setMonth(m)
-        },
-        /* @__PURE__ */ React.createElement("div", { className: "mono tiny" }, m.slice(5), m === CURRENT_MONTH ? "\xB7" : ""),
-        /* @__PURE__ */ React.createElement("div", { className: "mono" }, money(net))
-      );
-    })), dataMonths.length === 0 && /* @__PURE__ */ React.createElement("div", { className: "mono small" }, "Add your first income deposit to set your baseline.")));
+    const wants = categories.filter((c) => c.class === "WANT" && !c.archived);
+    const wantRows = wants.map((cat) => {
+      const pl = planned(cat.id), sp = C.spentForEnvelope(txns, month, cat.id);
+      return { cat, planned: pl, spent: sp, left: pl - sp };
+    }).filter((r) => r.planned > 0 || r.spent !== 0);
+    const wantLeft = wantRows.reduce((s, r) => s + r.left, 0);
+    const daysLeft = inProgress ? Math.max(0, C.daysInMonth(month) - +TODAY.slice(8, 10)) : 0;
+    const hasBudget = wantRows.length > 0;
+    const attention = [];
+    if (uncat !== 0) attention.push({
+      key: "uncat",
+      tone: "warn",
+      ic: "\u{1F3F7}",
+      title: "Sort " + fmt0(uncat) + " of mystery spending",
+      sub: "Unlabeled money can't be budgeted \u2014 tap to fix",
+      go: () => setTab("activity")
+    });
+    sinkingFunds.forEach((f) => {
+      const st = C.fundStatus(f, TODAY);
+      if (!st.onTrack) attention.push({
+        key: f.id,
+        tone: "crit",
+        ic: "\u23F3",
+        title: f.name + " fund is behind",
+        sub: "Put in " + money(st.catchUp) + "/mo to be ready in time",
+        go: () => setTab("funds")
+      });
+    });
+    if (!inProgress && monthNet < 0) attention.push({
+      key: "deficit",
+      tone: "crit",
+      ic: "\u25BE",
+      title: monthLabel(month) + " ended in the red",
+      sub: fmt0(-monthNet) + " more went out than came in",
+      go: () => setTab("activity")
+    });
+    if (dataMonths.length === 0) attention.push({
+      key: "start",
+      tone: "good",
+      ic: "\u2726",
+      title: "Start by adding your income",
+      sub: "Tap + and log a deposit \u2014 everything builds from that",
+      go: null
+    });
+    return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("section", { className: "card" }, /* @__PURE__ */ React.createElement("h3", null, "Left for fun & extras \xB7 ", monthLabel(month)), /* @__PURE__ */ React.createElement("div", { className: "hero-val" + (wantLeft < 0 ? " overspent" : "") }, hasBudget ? fmt0(wantLeft) : "$0"), /* @__PURE__ */ React.createElement("div", { className: "hero-cap" }, !hasBudget ? "Set a budget to see what's safe to spend." : wantLeft < 0 ? "Over this month's fun budget \u2014 needs aren't counted here." : inProgress ? daysLeft + (daysLeft === 1 ? " day" : " days") + " left in the month" : monthLabel(month) + " is closed"), wantRows.length > 0 && /* @__PURE__ */ React.createElement("div", { className: "want-rows" }, wantRows.map((r) => /* @__PURE__ */ React.createElement(EnvelopeRow, { key: r.cat.id, r, compact: true })))), /* @__PURE__ */ React.createElement(AffordCheck, { ...{ categories, txns, month, planned, settings, burn } }), /* @__PURE__ */ React.createElement("div", { className: "tiles" }, /* @__PURE__ */ React.createElement("div", { className: "tile" }, /* @__PURE__ */ React.createElement("div", { className: "t-label" }, "This month"), /* @__PURE__ */ React.createElement("div", { className: "t-val " + (monthNet > 0 ? "pos" : monthNet < 0 ? "negv" : "") }, monthNet > 0 ? "+" : "", fmt0(monthNet)), /* @__PURE__ */ React.createElement("div", { className: "t-cap" }, monthNet >= 0 ? "ahead" : "behind", inProgress ? " so far" : "")), /* @__PURE__ */ React.createElement("div", { className: "tile" }, /* @__PURE__ */ React.createElement("div", { className: "t-label" }, "Safety net"), /* @__PURE__ */ React.createElement("div", { className: "t-val" }, runway === Infinity ? "\u2014" : runway.toFixed(1) + " mo"), /* @__PURE__ */ React.createElement("div", { className: "t-cap" }, "if income stopped")), /* @__PURE__ */ React.createElement("div", { className: "tile" }, /* @__PURE__ */ React.createElement("div", { className: "t-label" }, "Safe to plan"), /* @__PURE__ */ React.createElement("div", { className: "t-val" }, fmt0(baseline.value)), /* @__PURE__ */ React.createElement("div", { className: "t-cap" }, "per month"))), /* @__PURE__ */ React.createElement("section", { className: "card" }, /* @__PURE__ */ React.createElement("h3", null, "Needs your attention"), attention.length === 0 && /* @__PURE__ */ React.createElement("div", { className: "attn", style: { cursor: "default" } }, /* @__PURE__ */ React.createElement("div", { className: "a-ic good" }, "\u2713"), /* @__PURE__ */ React.createElement("div", { className: "a-tx" }, /* @__PURE__ */ React.createElement("div", { className: "a-title" }, "All clear"), /* @__PURE__ */ React.createElement("div", { className: "a-sub" }, "Nothing needs a decision right now"))), attention.map((a) => /* @__PURE__ */ React.createElement("button", { key: a.key, className: "attn", onClick: a.go || void 0 }, /* @__PURE__ */ React.createElement("div", { className: "a-ic " + a.tone }, a.ic), /* @__PURE__ */ React.createElement("div", { className: "a-tx" }, /* @__PURE__ */ React.createElement("div", { className: "a-title" }, a.title), /* @__PURE__ */ React.createElement("div", { className: "a-sub" }, a.sub)), a.go && /* @__PURE__ */ React.createElement("span", { className: "chev" }, "\u203A")))), dataMonths.length > 0 && /* @__PURE__ */ React.createElement("section", { className: "card" }, /* @__PURE__ */ React.createElement("h3", null, "Ahead or behind, month by month"), /* @__PURE__ */ React.createElement(NetChart, { ...{ income, txns, dataMonths, month, setMonth } }), /* @__PURE__ */ React.createElement("div", { className: "chart-note" }, "Money in minus money out. Tap a month to view it.")));
   }
-  function Budget({ categories, month, txns, planned, setPlanned, unassigned, baseline, suggestions, rev }) {
-    const classes = [["NEED", "Needs"], ["WANT", "Wants"], ["SAVING", "Savings"]];
+  function EnvelopeRow({ r, compact, onTap }) {
+    const pct = r.planned > 0 ? r.spent / r.planned : r.spent > 0 ? 1 : 0;
+    const track = pct >= 1 ? "crit-track" : pct >= 0.8 ? "warn-track" : "";
+    return /* @__PURE__ */ React.createElement("div", { className: "row", onClick: onTap, style: onTap ? { cursor: "pointer" } : void 0 }, /* @__PURE__ */ React.createElement("div", { className: "row-line" }, /* @__PURE__ */ React.createElement("span", { className: "row-name" }, /* @__PURE__ */ React.createElement("span", { className: "ic" }, r.cat.icon), r.cat.name), /* @__PURE__ */ React.createElement("span", { className: "row-amt" }, r.left < 0 ? fmt0(-r.left) : fmt0(r.left), " ", /* @__PURE__ */ React.createElement("small", null, r.left < 0 ? "over" : "left"))), /* @__PURE__ */ React.createElement("div", { className: "meter " + track }, /* @__PURE__ */ React.createElement("i", { style: { width: Math.min(100, Math.max(0, pct * 100)) + "%" } })), !compact && /* @__PURE__ */ React.createElement("div", { className: "row-meta" }, /* @__PURE__ */ React.createElement("span", null, money(r.spent), " of ", money(r.planned)), pct >= 1 ? /* @__PURE__ */ React.createElement("span", { className: "tag over" }, "over budget") : pct >= 0.8 ? /* @__PURE__ */ React.createElement("span", { className: "tag close" }, "getting close") : null));
+  }
+  function AffordCheck({ categories, txns, month, planned, settings, burn }) {
+    const [amt, setAmt] = useState("");
+    const wantDefault = categories.find((c) => c.class === "WANT");
+    const [catId, setCatId] = useState(wantDefault ? wantDefault.id : categories[0] && categories[0].id);
+    const cents = C.parseDollars(amt);
+    const v = useMemo(() => {
+      if (cents == null || cents <= 0 || !catId) return null;
+      return C.canAfford(
+        cents,
+        planned(catId),
+        C.spentForEnvelope(txns, month, catId),
+        settings.liquidCushion,
+        burn,
+        settings.targetRunway
+      );
+    }, [cents, catId, planned, txns, month, settings.liquidCushion, burn, settings.targetRunway]);
+    const cat = categories.find((c) => c.id === catId);
+    const copy = v && {
+      GREEN: {
+        ic: "\u2713",
+        head: "Yes \u2014 comfortably.",
+        sub: "Fits your " + (cat ? cat.name : "") + " budget with " + money(v.envelopeAfter) + " to spare."
+      },
+      AMBER: {
+        ic: "\u25B3",
+        head: "Yes, but it'll be snug.",
+        sub: "It fits the budget (" + money(v.envelopeAfter) + " left after), but your safety net is below target \u2014 worth it only if it matters."
+      },
+      RED: {
+        ic: "\u2715",
+        head: v.fitsEnvelope ? "This would dent your safety net." : "This blows the budget.",
+        sub: v.fitsEnvelope ? "It fits the category, but drops your safety net below your " + settings.targetRunway + "-month goal." : "You'd go " + money(-v.envelopeAfter) + " over " + (cat ? cat.name : "") + " this month."
+      }
+    }[v.verdict];
+    return /* @__PURE__ */ React.createElement("section", { className: "card" }, /* @__PURE__ */ React.createElement("h3", null, "Can I afford this?"), /* @__PURE__ */ React.createElement("div", { className: "afford-grid" }, /* @__PURE__ */ React.createElement(
+      "input",
+      {
+        type: "number",
+        inputMode: "decimal",
+        step: "0.01",
+        placeholder: "Amount $",
+        value: amt,
+        onChange: (e) => setAmt(e.target.value)
+      }
+    ), /* @__PURE__ */ React.createElement("select", { value: catId, onChange: (e) => setCatId(e.target.value) }, categories.map((c) => /* @__PURE__ */ React.createElement("option", { key: c.id, value: c.id }, c.icon, " ", c.name)))), v ? /* @__PURE__ */ React.createElement("div", { className: "verdict " + v.verdict.toLowerCase() }, /* @__PURE__ */ React.createElement("span", { className: "v-ic" }, copy.ic), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("b", null, copy.head), /* @__PURE__ */ React.createElement("span", { className: "v-sub" }, copy.sub))) : /* @__PURE__ */ React.createElement("div", { className: "sub", style: { marginTop: 8 } }, "Type a price to get a straight answer before you buy."));
+  }
+  function NetChart({ income, txns, dataMonths, month, setMonth }) {
+    const months = dataMonths.slice(-8);
+    const nets = months.map((m) => ({ m, net: C.netForMonth(income, txns, m) }));
+    const maxAbs = Math.max(1, ...nets.map((d) => Math.abs(d.net)));
+    const W = 320, H = 132, padT = 18, padB = 22;
+    const plotH = H - padT - padB, zero = padT + plotH * (maxAbs / (2 * maxAbs));
+    const half = plotH / 2;
+    const bw = Math.min(24, Math.floor(W / months.length) - 8);
+    const step = W / months.length;
+    const r = 4;
+    function barPath(x, net) {
+      const h = Math.max(2, Math.abs(net) / maxAbs * (half - 2));
+      if (net >= 0) {
+        const y = zero - h;
+        return `M${x},${zero} L${x},${y + r} Q${x},${y} ${x + r},${y} L${x + bw - r},${y} Q${x + bw},${y} ${x + bw},${y + r} L${x + bw},${zero} Z`;
+      }
+      const y2 = zero + h;
+      return `M${x},${zero} L${x + bw},${zero} L${x + bw},${y2 - r} Q${x + bw},${y2} ${x + bw - r},${y2} L${x + r},${y2} Q${x},${y2} ${x},${y2 - r} Z`;
+    }
+    const last = nets[nets.length - 1];
+    return /* @__PURE__ */ React.createElement("div", { className: "chart-wrap" }, /* @__PURE__ */ React.createElement(
+      "svg",
+      {
+        viewBox: `0 0 ${W} ${H}`,
+        width: "100%",
+        role: "img",
+        "aria-label": "Monthly net: " + nets.map((d) => monthShort(d.m) + " " + fmt0(d.net)).join(", ")
+      },
+      /* @__PURE__ */ React.createElement("line", { x1: "0", x2: W, y1: zero, y2: zero, stroke: "var(--baseline)", strokeWidth: "1" }),
+      nets.map((d, i) => {
+        const x = i * step + (step - bw) / 2;
+        const sel = d.m === month;
+        return /* @__PURE__ */ React.createElement("g", { key: d.m, onClick: () => setMonth(d.m), style: { cursor: "pointer" } }, /* @__PURE__ */ React.createElement("rect", { x: i * step, y: "0", width: step, height: H, fill: "transparent" }, /* @__PURE__ */ React.createElement("title", null, monthLabel(d.m), ": ", money(d.net))), /* @__PURE__ */ React.createElement(
+          "path",
+          {
+            d: barPath(x, d.net),
+            fill: d.net >= 0 ? "var(--accent)" : "var(--neg)",
+            opacity: sel ? 1 : 0.55
+          }
+        ), /* @__PURE__ */ React.createElement(
+          "text",
+          {
+            x: i * step + step / 2,
+            y: H - 6,
+            textAnchor: "middle",
+            fontSize: "10",
+            fill: sel ? "var(--ink)" : "var(--muted)",
+            fontWeight: sel ? 700 : 400
+          },
+          monthShort(d.m)
+        ), d === last && /* @__PURE__ */ React.createElement(
+          "text",
+          {
+            x: i * step + step / 2,
+            y: d.net >= 0 ? zero - Math.abs(d.net) / maxAbs * (half - 2) - 5 : zero + Math.abs(d.net) / maxAbs * (half - 2) + 12,
+            textAnchor: "middle",
+            fontSize: "10",
+            fontWeight: "600",
+            fill: "var(--ink2)"
+          },
+          fmt0(d.net)
+        ));
+      })
+    ));
+  }
+  function Budget(p) {
+    const { categories, txns, month, planned, setPlanned, unassigned, baseline, rev } = p;
+    const [editing, setEditing] = useState(null);
+    const groups = [
+      ["NEED", "Essentials", "Rent, groceries, the van \u2014 the must-pays"],
+      ["WANT", "Fun & extras", "The spending that's a choice"],
+      ["SAVING", "Future you", "Savings and safety net"]
+    ];
     const zero = unassigned === 0;
-    return /* @__PURE__ */ React.createElement("div", { className: "screen" }, /* @__PURE__ */ React.createElement("section", { className: "card " + (zero ? "greencard" : "ambercard") }, /* @__PURE__ */ React.createElement("div", { className: "cardhead" }, /* @__PURE__ */ React.createElement("span", null, "Unassigned"), /* @__PURE__ */ React.createElement("span", { className: "big" }, money(unassigned))), /* @__PURE__ */ React.createElement("div", { className: "mono small" }, zero ? "zero-based \u2713 every dollar assigned" : "assign every dollar of " + money(baseline.value) + " to reach $0.00", " \xB7 split " + Math.round(suggestions.ratios.need * 100) + "/" + Math.round(suggestions.ratios.want * 100) + "/" + Math.round(suggestions.ratios.save * 100))), classes.map(([cls, label]) => {
+    return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h2", { className: "screen-title" }, monthLabel(month), " budget"), /* @__PURE__ */ React.createElement("p", { className: "screen-sub" }, "Give every dollar of your ", fmt0(baseline.value), " plan a job."), /* @__PURE__ */ React.createElement("section", { className: "card", style: { paddingTop: 13, paddingBottom: 13 } }, /* @__PURE__ */ React.createElement("div", { className: "row-line" }, /* @__PURE__ */ React.createElement("span", { className: "row-name" }, zero ? "Fully planned" : "Still to assign"), /* @__PURE__ */ React.createElement("span", { className: "row-amt" }, zero ? /* @__PURE__ */ React.createElement("span", { className: "tag ok" }, "\u2713 every dollar has a job") : fmt0(unassigned))), !zero && /* @__PURE__ */ React.createElement("div", { className: "sub" }, "Tap a category to adjust its plan until this hits $0.")), groups.map(([cls, label, sub]) => {
       const members = categories.filter((c) => c.class === cls && !c.archived);
       if (!members.length) return null;
-      return /* @__PURE__ */ React.createElement("section", { key: cls, className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "cardhead" }, /* @__PURE__ */ React.createElement("span", null, label)), members.map((cat) => {
-        const p = planned(cat.id), s = C.spentForEnvelope(txns, month, cat.id), rem = p - s;
-        return /* @__PURE__ */ React.createElement("div", { key: cat.id, className: "envrow" }, /* @__PURE__ */ React.createElement("div", { className: "envtop mono" }, /* @__PURE__ */ React.createElement("span", null, cat.icon, " ", cat.name, cat.isSinkingFund ? " \u27F3" : ""), /* @__PURE__ */ React.createElement("span", { className: "planwrap" }, "plan $", /* @__PURE__ */ React.createElement(
+      return /* @__PURE__ */ React.createElement("section", { key: cls, className: "card" }, /* @__PURE__ */ React.createElement("h3", null, label), /* @__PURE__ */ React.createElement("div", { className: "sub", style: { marginBottom: 4 } }, sub), members.map((cat) => {
+        const pl = planned(cat.id), sp = C.spentForEnvelope(txns, month, cat.id);
+        const r = { cat, planned: pl, spent: sp, left: pl - sp };
+        const isEd = editing === cat.id;
+        return /* @__PURE__ */ React.createElement("div", { key: cat.id }, /* @__PURE__ */ React.createElement(EnvelopeRow, { r, onTap: () => setEditing(isEd ? null : cat.id) }), isEd && /* @__PURE__ */ React.createElement("div", { className: "fund-actions", style: { marginTop: 0, marginBottom: 10 } }, /* @__PURE__ */ React.createElement(
           "input",
           {
-            key: month + ":" + rev + ":" + cat.id,
-            className: "num",
+            key: month + rev + cat.id,
             type: "number",
-            step: "1",
-            defaultValue: (p / 100).toFixed(0),
-            onBlur: (e) => setPlanned(cat.id, e.target.value)
+            inputMode: "decimal",
+            defaultValue: (pl / 100).toFixed(0),
+            "aria-label": "Plan for " + cat.name,
+            onKeyDown: (e) => {
+              if (e.key === "Enter") {
+                setPlanned(cat.id, e.target.value);
+                setEditing(null);
+              }
+            },
+            id: "plan-" + cat.id
           }
-        ))), /* @__PURE__ */ React.createElement(Bar, { spent: s, planned: p }), /* @__PURE__ */ React.createElement("div", { className: "envbot mono tiny" }, "spent ", money(s), " \xB7 remaining ", /* @__PURE__ */ React.createElement("span", { className: rem < 0 ? "neg" : "" }, money(rem))));
+        ), /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: () => {
+          const el = document.getElementById("plan-" + cat.id);
+          setPlanned(cat.id, el.value);
+          setEditing(null);
+        } }, "Set plan")));
       }));
     }));
   }
-  function Transactions({ txns, income, categories, catById, month, addTxn, addIncome, recategorize }) {
+  function Activity(p) {
+    const { txns, income, categories, month, recategorize, uncat } = p;
+    const [view, setView] = useState("spend");
     const [showAll, setShowAll] = useState(false);
+    const opts = [/* @__PURE__ */ React.createElement("option", { key: "_", value: "" }, "\u{1F3F7} needs a label")].concat(
+      categories.map((c) => /* @__PURE__ */ React.createElement("option", { key: c.id, value: c.id }, c.icon, " ", c.name))
+    );
+    const spendList = txns.filter((t) => showAll || C.monthOf(t.date) === month).slice().sort((a, b) => a.date < b.date ? 1 : -1);
+    const incomeList = income.filter((e) => showAll || C.monthOf(e.date) === month).slice().sort((a, b) => a.date < b.date ? 1 : -1);
+    const uncatFirst = spendList.slice().sort((a, b) => (a.categoryId == null ? -1 : 0) - (b.categoryId == null ? -1 : 0));
+    return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h2", { className: "screen-title" }, "Activity"), /* @__PURE__ */ React.createElement("p", { className: "screen-sub" }, uncat !== 0 ? fmt0(uncat) + " is unlabeled this month \u2014 give it a category so it counts." : "Everything has a home. Tap + to log something new."), /* @__PURE__ */ React.createElement("div", { className: "seg" }, /* @__PURE__ */ React.createElement("button", { className: view === "spend" ? "on" : "", onClick: () => setView("spend") }, "Spending"), /* @__PURE__ */ React.createElement("button", { className: view === "income" ? "on" : "", onClick: () => setView("income") }, "Income"), /* @__PURE__ */ React.createElement("button", { className: showAll ? "on" : "", onClick: () => setShowAll(!showAll) }, showAll ? "All months \u2713" : "All months")), view === "spend" && /* @__PURE__ */ React.createElement("section", { className: "card" }, uncatFirst.length === 0 && /* @__PURE__ */ React.createElement("div", { className: "empty" }, /* @__PURE__ */ React.createElement("span", { className: "e-ic" }, "\u{1F9FE}"), "Nothing logged", showAll ? "" : " in " + monthLabel(month), " yet.", /* @__PURE__ */ React.createElement("br", null), "Tap + to add your first expense."), uncatFirst.map((t) => {
+      const un = t.categoryId == null;
+      return /* @__PURE__ */ React.createElement("div", { key: t.id, className: "txrow" + (un ? " uncat" : "") }, /* @__PURE__ */ React.createElement("div", { className: "tx-main" }, /* @__PURE__ */ React.createElement("div", { className: "tx-merch" }, t.merchant || "Unnamed"), /* @__PURE__ */ React.createElement("div", { className: "tx-date" }, monthShort(C.monthOf(t.date)), " ", +t.date.slice(8, 10), t.amount < 0 ? " \xB7 refund" : "")), /* @__PURE__ */ React.createElement("span", { className: "tx-amt" + (t.amount < 0 ? " refund" : "") }, t.amount < 0 ? "+" + money(-t.amount) : money(t.amount)), /* @__PURE__ */ React.createElement(
+        "select",
+        {
+          className: "catpick",
+          value: t.categoryId || "",
+          onChange: (e) => recategorize(t.id, e.target.value),
+          "aria-label": "Category"
+        },
+        opts
+      ));
+    })), view === "income" && /* @__PURE__ */ React.createElement("section", { className: "card" }, incomeList.length === 0 && /* @__PURE__ */ React.createElement("div", { className: "empty" }, /* @__PURE__ */ React.createElement("span", { className: "e-ic" }, "\u{1F4B5}"), "No deposits logged", showAll ? "" : " in " + monthLabel(month), ".", /* @__PURE__ */ React.createElement("br", null), "Tap +, switch to Income, and add one \u2014 your whole plan is built on it."), incomeList.map((e) => /* @__PURE__ */ React.createElement("div", { key: e.id, className: "txrow" }, /* @__PURE__ */ React.createElement("div", { className: "tx-main" }, /* @__PURE__ */ React.createElement("div", { className: "tx-merch" }, e.source || "Deposit"), /* @__PURE__ */ React.createElement("div", { className: "tx-date" }, monthShort(C.monthOf(e.date)), " ", +e.date.slice(8, 10))), /* @__PURE__ */ React.createElement("span", { className: "tx-amt refund" }, "+", money(e.amount))))));
+  }
+  function AddSheet({ month, addTxn, addIncome, categories, close }) {
     const [kind, setKind] = useState("spend");
     const defaultDate = month === CURRENT_MONTH ? TODAY : month + "-15";
     const [form, setForm] = useState({ date: defaultDate, merchant: "", amount: "", categoryId: "" });
-    useEffect(() => {
-      setForm((f) => ({ ...f, date: month === CURRENT_MONTH ? TODAY : month + "-15" }));
-    }, [month]);
-    const list = txns.filter((t) => showAll || C.monthOf(t.date) === month).slice().sort((a, b) => a.date < b.date ? 1 : -1);
-    const incomeList = income.filter((e) => showAll || C.monthOf(e.date) === month).slice().sort((a, b) => a.date < b.date ? 1 : -1);
-    const opts = [/* @__PURE__ */ React.createElement("option", { key: "_", value: "" }, "\u2014 uncategorized \u2014")].concat(
-      categories.map((c) => /* @__PURE__ */ React.createElement("option", { key: c.id, value: c.id }, c.icon, " ", c.name))
-    );
-    const submit = () => {
-      const fn = kind === "income" ? addIncome : addTxn;
-      if (fn(form)) setForm({ ...form, merchant: "", amount: "" });
+    const save = () => {
+      const ok = (kind === "income" ? addIncome : addTxn)(form);
+      if (ok) close();
     };
-    return /* @__PURE__ */ React.createElement("div", { className: "screen" }, /* @__PURE__ */ React.createElement("section", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "cardhead" }, /* @__PURE__ */ React.createElement("span", null, "Quick add"), /* @__PURE__ */ React.createElement("span", { className: "mono tiny" }, /* @__PURE__ */ React.createElement("button", { className: "link" + (kind === "spend" ? " bold" : ""), onClick: () => setKind("spend") }, "spend"), " / ", /* @__PURE__ */ React.createElement("button", { className: "link" + (kind === "income" ? " bold" : ""), onClick: () => setKind("income") }, "income"))), /* @__PURE__ */ React.createElement("div", { className: "addgrid" }, /* @__PURE__ */ React.createElement("input", { type: "date", value: form.date, onChange: (e) => setForm({ ...form, date: e.target.value }) }), /* @__PURE__ */ React.createElement(
+    return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "sheet-bg", onClick: close }), /* @__PURE__ */ React.createElement("div", { className: "sheet" }, /* @__PURE__ */ React.createElement("h3", null, "Add ", kind === "income" ? "income" : "spending"), /* @__PURE__ */ React.createElement("div", { className: "seg" }, /* @__PURE__ */ React.createElement("button", { className: kind === "spend" ? "on" : "", onClick: () => setKind("spend") }, "Spending"), /* @__PURE__ */ React.createElement("button", { className: kind === "income" ? "on" : "", onClick: () => setKind("income") }, "Income")), /* @__PURE__ */ React.createElement("div", { className: "f-grid" }, /* @__PURE__ */ React.createElement(
       "input",
       {
-        placeholder: kind === "income" ? "source" : "merchant",
-        value: form.merchant,
-        onChange: (e) => setForm({ ...form, merchant: e.target.value })
+        className: "full",
+        type: "number",
+        inputMode: "decimal",
+        step: "0.01",
+        autoFocus: true,
+        placeholder: kind === "income" ? "Amount received $" : "Amount $ (negative = refund)",
+        value: form.amount,
+        onChange: (e) => setForm({ ...form, amount: e.target.value })
       }
     ), /* @__PURE__ */ React.createElement(
       "input",
       {
-        type: "number",
-        step: "0.01",
-        placeholder: "amount $",
-        value: form.amount,
-        onChange: (e) => setForm({ ...form, amount: e.target.value })
+        placeholder: kind === "income" ? "From (e.g. client)" : "Where (e.g. Fred Meyer)",
+        value: form.merchant,
+        onChange: (e) => setForm({ ...form, merchant: e.target.value })
       }
-    ), kind === "spend" ? /* @__PURE__ */ React.createElement("select", { value: form.categoryId, onChange: (e) => setForm({ ...form, categoryId: e.target.value }) }, opts) : /* @__PURE__ */ React.createElement("div", { className: "mono tiny selfc" }, "deposit \u2192 baseline history"), /* @__PURE__ */ React.createElement("button", { className: "add", onClick: submit }, "+ add ", kind)), /* @__PURE__ */ React.createElement("div", { className: "mono tiny hint" }, kind === "spend" ? "positive = spend \xB7 negative = refund/credit" : "logs a deposit; feeds Safe-to-Budget")), incomeList.length > 0 && /* @__PURE__ */ React.createElement("section", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "cardhead" }, /* @__PURE__ */ React.createElement("span", null, "Income", showAll ? "" : " \xB7 " + month)), incomeList.map((e) => /* @__PURE__ */ React.createElement("div", { key: e.id, className: "txn mono" }, /* @__PURE__ */ React.createElement("div", { className: "txnl" }, /* @__PURE__ */ React.createElement("span", { className: "tdate" }, e.date.slice(5)), /* @__PURE__ */ React.createElement("span", { className: "tmerch" }, e.source || "Deposit")), /* @__PURE__ */ React.createElement("div", { className: "txnr" }, /* @__PURE__ */ React.createElement("span", { className: "tamt pos" }, "+", money(e.amount)))))), /* @__PURE__ */ React.createElement("section", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "cardhead" }, /* @__PURE__ */ React.createElement("span", null, showAll ? "All transactions" : "Transactions \xB7 " + month), /* @__PURE__ */ React.createElement("button", { className: "link", onClick: () => setShowAll(!showAll) }, showAll ? "this month" : "show all")), list.length === 0 && /* @__PURE__ */ React.createElement("div", { className: "mono small" }, "Log a grocery run or any spend above \u2014 it lands in its envelope instantly."), list.map((t) => {
-      const uncatd = t.categoryId == null;
-      return /* @__PURE__ */ React.createElement("div", { key: t.id, className: "txn mono" + (uncatd ? " uncat" : "") }, /* @__PURE__ */ React.createElement("div", { className: "txnl" }, /* @__PURE__ */ React.createElement("span", { className: "tdate" }, t.date.slice(5)), /* @__PURE__ */ React.createElement("span", { className: "tmerch" }, t.merchant || "\u2014", uncatd && /* @__PURE__ */ React.createElement("span", { className: "badge" }, "OTHER"))), /* @__PURE__ */ React.createElement("div", { className: "txnr" }, /* @__PURE__ */ React.createElement("span", { className: "tamt" + (t.amount < 0 ? " neg" : "") }, money(t.amount)), /* @__PURE__ */ React.createElement("select", { className: "recat", value: t.categoryId || "", onChange: (e) => recategorize(t.id, e.target.value) }, opts)));
-    })));
+    ), /* @__PURE__ */ React.createElement("input", { type: "date", value: form.date, onChange: (e) => setForm({ ...form, date: e.target.value }) }), kind === "spend" && /* @__PURE__ */ React.createElement(
+      "select",
+      {
+        className: "full",
+        value: form.categoryId,
+        onChange: (e) => setForm({ ...form, categoryId: e.target.value })
+      },
+      /* @__PURE__ */ React.createElement("option", { value: "" }, "Pick a category (or leave for later)"),
+      categories.map((c) => /* @__PURE__ */ React.createElement("option", { key: c.id, value: c.id }, c.icon, " ", c.name))
+    ), /* @__PURE__ */ React.createElement("button", { className: "save", onClick: save }, "Save")), kind === "income" && /* @__PURE__ */ React.createElement("div", { className: "hint" }, 'Deposits feed your "safe to plan" number \u2014 log every one.')));
   }
   function Funds({ sinkingFunds, catById, adjustFund }) {
     const [amounts, setAmounts] = useState({});
-    return /* @__PURE__ */ React.createElement("div", { className: "screen" }, /* @__PURE__ */ React.createElement("section", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "cardhead" }, /* @__PURE__ */ React.createElement("span", null, "Sinking funds")), /* @__PURE__ */ React.createElement("div", { className: "mono small" }, `Pre-fund the lumpy stuff so a $1,800 repair month doesn't detonate the cushion. Money should already be sitting in "Vehicle" when the alternator dies.`)), sinkingFunds.map((f) => {
+    return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h2", { className: "screen-title" }, "Rainy-day funds"), /* @__PURE__ */ React.createElement("p", { className: "screen-sub" }, "Big bills you can see coming. Save a little monthly so the repair bill lands on a full jar, not your cushion."), sinkingFunds.map((f) => {
       const st = C.fundStatus(f, TODAY);
       const cat = catById[f.categoryId];
       const pct = f.targetBalance > 0 ? f.balance / f.targetBalance : 0;
-      return /* @__PURE__ */ React.createElement("section", { key: f.id, className: "card" + (st.onTrack ? "" : " ambercard") }, /* @__PURE__ */ React.createElement("div", { className: "cardhead" }, /* @__PURE__ */ React.createElement("span", null, cat ? cat.icon + " " : "", f.name), /* @__PURE__ */ React.createElement("span", { className: "big" }, money(f.balance), " / ", money(f.targetBalance))), /* @__PURE__ */ React.createElement(Bar, { spent: f.balance, planned: f.targetBalance }), /* @__PURE__ */ React.createElement("div", { className: "mono small" }, "set aside ", /* @__PURE__ */ React.createElement("b", null, money(st.setAside), "/mo"), " (", money(f.annualEstimate), "/yr \xF7 12)", st.monthsUntilFunded !== Infinity && st.remaining > 0 && /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 funded in ", st.monthsUntilFunded, " mo"), st.remaining === 0 && /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 fully funded \u2713"), f.dueDate && /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 due ", f.dueDate.slice(0, 7))), !st.onTrack && /* @__PURE__ */ React.createElement("div", { className: "flag" }, "\u2691 ", money(st.shortfall), " short by due date \u2014 catch-up ", money(st.catchUp), "/mo"), /* @__PURE__ */ React.createElement("div", { className: "fundrow" }, /* @__PURE__ */ React.createElement(
+      const funded = st.remaining === 0;
+      return /* @__PURE__ */ React.createElement("section", { key: f.id, className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "row-line" }, /* @__PURE__ */ React.createElement("span", { className: "row-name" }, /* @__PURE__ */ React.createElement("span", { className: "ic" }, cat ? cat.icon : "\u25CD"), f.name), /* @__PURE__ */ React.createElement("span", { className: "row-amt" }, fmt0(f.balance), " ", /* @__PURE__ */ React.createElement("small", null, "of ", fmt0(f.targetBalance)))), /* @__PURE__ */ React.createElement("div", { className: "meter" + (st.onTrack ? "" : " warn-track") }, /* @__PURE__ */ React.createElement("i", { style: { width: Math.min(100, pct * 100) + "%" } })), /* @__PURE__ */ React.createElement("div", { className: "row-meta" }, /* @__PURE__ */ React.createElement("span", null, money(st.setAside), "/mo planned"), funded ? /* @__PURE__ */ React.createElement("span", { className: "tag ok" }, "\u2713 full") : !st.onTrack ? /* @__PURE__ */ React.createElement("span", { className: "tag close" }, "\u23F3 behind \u2014 add ", money(st.catchUp), "/mo") : st.monthsUntilFunded !== Infinity ? /* @__PURE__ */ React.createElement("span", null, "full in ~", st.monthsUntilFunded, " mo") : null), /* @__PURE__ */ React.createElement("div", { className: "fund-actions" }, /* @__PURE__ */ React.createElement(
         "input",
         {
-          className: "num wide",
           type: "number",
-          step: "1",
-          placeholder: "amount $",
+          inputMode: "decimal",
+          placeholder: "Amount $",
           value: amounts[f.id] || "",
           onChange: (e) => setAmounts({ ...amounts, [f.id]: e.target.value })
         }
-      ), /* @__PURE__ */ React.createElement("button", { className: "mini", onClick: () => {
+      ), /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: () => {
         adjustFund(f.id, amounts[f.id], 1);
         setAmounts({ ...amounts, [f.id]: "" });
-      } }, "+ contribute"), /* @__PURE__ */ React.createElement("button", { className: "mini ghost", onClick: () => {
+      } }, "Add"), /* @__PURE__ */ React.createElement("button", { className: "btn quiet", onClick: () => {
         adjustFund(f.id, amounts[f.id], -1);
         setAmounts({ ...amounts, [f.id]: "" });
-      } }, "\u2212 withdraw")));
-    }), /* @__PURE__ */ React.createElement("div", { className: "mono tiny hint" }, "Contributions move money between your cushion and a fund \u2014 they are not spending, so they never touch envelope totals."));
+      } }, "Take out")));
+    }), /* @__PURE__ */ React.createElement("div", { className: "footnote" }, "Moving money here isn't spending \u2014 it never touches your monthly budget."));
   }
-  function Calculators({ settings, burn, runway, categories, txns, month, planned, baseline, sinkingFunds }) {
-    const [amt, setAmt] = useState("");
-    const [catId, setCatId] = useState(categories.find((c) => c.class === "WANT")?.id || categories[0]?.id);
-    const cents = C.parseDollars(amt);
-    const verdictInfo = useMemo(() => {
-      if (cents == null || cents <= 0 || !catId) return null;
-      const p = planned(catId), s = C.spentForEnvelope(txns, month, catId);
-      return C.canAfford(cents, p, s, settings.liquidCushion, burn, settings.targetRunway);
-    }, [cents, catId, planned, txns, month, settings.liquidCushion, burn, settings.targetRunway]);
-    const minIncome = C.minIncomeNeeded(
-      categories.map((c) => ({ categoryId: c.id, planned: planned(c.id) })),
-      categories,
-      sinkingFunds
-    );
-    const vClass = verdictInfo ? { GREEN: "greencard", AMBER: "ambercard", RED: "redcard" }[verdictInfo.verdict] : "";
-    const vText = verdictInfo && {
-      GREEN: "\u2713 fits the envelope and keeps your runway target \u2014 go ahead.",
-      AMBER: "\u25B3 fits the envelope, but your runway is below target \u2014 fine if it matters, skip if it doesn't.",
-      RED: "\u2717 breaks the envelope or cuts runway too deep \u2014 this one costs future-you."
-    }[verdictInfo.verdict];
-    return /* @__PURE__ */ React.createElement("div", { className: "screen" }, /* @__PURE__ */ React.createElement("section", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "cardhead" }, /* @__PURE__ */ React.createElement("span", null, "Runway"), /* @__PURE__ */ React.createElement("span", { className: "big" }, runwayLabel(runway), " months")), /* @__PURE__ */ React.createElement("div", { className: "mono small" }, money(settings.liquidCushion), " cushion \xF7 ", money(burn), "/mo core (NEED) burn. Recomputes live from your transactions \u2014 adjust cushion in Settings.")), /* @__PURE__ */ React.createElement("section", { className: "card " + vClass }, /* @__PURE__ */ React.createElement("div", { className: "cardhead" }, /* @__PURE__ */ React.createElement("span", null, "Can I afford this?")), /* @__PURE__ */ React.createElement("div", { className: "addgrid" }, /* @__PURE__ */ React.createElement("input", { type: "number", step: "0.01", placeholder: "amount $", value: amt, onChange: (e) => setAmt(e.target.value) }), /* @__PURE__ */ React.createElement("select", { value: catId, onChange: (e) => setCatId(e.target.value) }, categories.map((c) => /* @__PURE__ */ React.createElement("option", { key: c.id, value: c.id }, c.icon, " ", c.name)))), verdictInfo ? /* @__PURE__ */ React.createElement("div", { className: "mono small verdict" }, /* @__PURE__ */ React.createElement("b", null, vText), /* @__PURE__ */ React.createElement("br", null), "envelope after: ", /* @__PURE__ */ React.createElement("span", { className: verdictInfo.envelopeAfter < 0 ? "neg" : "" }, money(verdictInfo.envelopeAfter)), " ", "\xB7 runway after: ", runwayLabel(verdictInfo.runwayAfter), " mo (target ", settings.targetRunway, ")") : /* @__PURE__ */ React.createElement("div", { className: "mono small" }, "Enter an amount to get a verdict at the register.")), /* @__PURE__ */ React.createElement("section", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "cardhead" }, /* @__PURE__ */ React.createElement("span", null, "Break-even floor"), /* @__PURE__ */ React.createElement("span", { className: "big" }, money(minIncome))), /* @__PURE__ */ React.createElement("div", { className: "mono small" }, "You need at least ", money(minIncome), "/month to cover essentials (NEED envelopes) and keep every sinking fund on schedule. Below that, something gives.")), /* @__PURE__ */ React.createElement("section", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "cardhead" }, /* @__PURE__ */ React.createElement("span", null, "Sinking funds")), sinkingFunds.map((f) => {
-      const st = C.fundStatus(f, TODAY);
-      return /* @__PURE__ */ React.createElement("div", { key: f.id, className: "envrow mono small" }, f.name, ": ", money(st.setAside), "/mo", st.remaining > 0 ? /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 ", money(st.remaining), " to go", st.monthsUntilFunded !== Infinity && /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 ~", st.monthsUntilFunded, " mo")) : /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 funded \u2713"));
-    })), /* @__PURE__ */ React.createElement("section", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "cardhead" }, /* @__PURE__ */ React.createElement("span", null, "Baseline (Safe-to-Budget)"), /* @__PURE__ */ React.createElement("span", { className: "big" }, money(baseline.value))), /* @__PURE__ */ React.createElement("div", { className: "mono small" }, "avg-3M ", money(baseline.avg3), " \xB7 trailing-low+10% ", money(baseline.low), " \u2014 budgeting off deposits is how irregular earners go broke in down months.")));
-  }
-  function Settings({ settings, baseline, setSetting, exportJSON, importJSON, resetSeed, rev }) {
+  function Settings(p) {
+    const { settings, baseline, setSetting, exportJSON, importJSON, resetSeed, rev } = p;
+    const [check, setCheck] = useState(null);
     const methods = [
-      ["DEFAULT", "Conservative (default) \u2014 min of the two below"],
-      ["AVERAGE_3M", "3-month average of deposits"],
-      ["TRAILING_LOW", "Trailing low + 10% buffer"],
-      ["MANUAL", "Manual amount"]
+      ["DEFAULT", "Cautious (recommended)", "Plans around the lower of your recent average and your slowest month. Best for uneven income."],
+      ["AVERAGE_3M", "Recent average", "The average of your last three months of deposits."],
+      ["TRAILING_LOW", "Slowest month +10%", "Your worst recent month with a small buffer."],
+      ["MANUAL", "I'll set it myself", "Type the monthly amount you want to plan around."]
     ];
     const setMoney = (key) => (e) => {
       const cents = C.parseDollars(e.target.value);
       if (cents != null) setSetting(key, cents);
     };
-    return /* @__PURE__ */ React.createElement("div", { className: "screen" }, /* @__PURE__ */ React.createElement("section", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "cardhead" }, /* @__PURE__ */ React.createElement("span", null, "Baseline income method")), methods.map(([id, label]) => /* @__PURE__ */ React.createElement("label", { key: id, className: "radio mono" }, /* @__PURE__ */ React.createElement(
+    const runCheck = () => setCheck(window.runBudgetTests(C, window.BudgetTestSeed || SEED));
+    return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h2", { className: "screen-title" }, "Settings"), /* @__PURE__ */ React.createElement("p", { className: "screen-sub" }, "How your plan is calculated, and your data."), /* @__PURE__ */ React.createElement("section", { className: "card" }, /* @__PURE__ */ React.createElement("h3", null, "How much to plan around"), /* @__PURE__ */ React.createElement("div", { className: "sub", style: { marginBottom: 4 } }, "Right now: ", /* @__PURE__ */ React.createElement("b", null, fmt0(baseline.value), "/mo"), ". With uneven income, planning around a careful number beats planning around a good month."), methods.map(([id, title, sub]) => /* @__PURE__ */ React.createElement("label", { key: id, className: "opt" }, /* @__PURE__ */ React.createElement(
       "input",
       {
         type: "radio",
@@ -1453,37 +1665,37 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
         checked: settings.baselineMethod === id,
         onChange: () => setSetting("baselineMethod", id)
       }
-    ), " ", label)), settings.baselineMethod === "MANUAL" && /* @__PURE__ */ React.createElement("label", { className: "mono block" }, "manual $", /* @__PURE__ */ React.createElement(
+    ), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("span", { className: "o-title" }, title), /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("span", { className: "o-sub" }, sub)))), settings.baselineMethod === "MANUAL" && /* @__PURE__ */ React.createElement("div", { className: "field" }, /* @__PURE__ */ React.createElement("label", null, "Monthly amount", /* @__PURE__ */ React.createElement("span", { className: "f-sub" }, "dollars per month")), /* @__PURE__ */ React.createElement(
       "input",
       {
         key: "mb" + rev,
-        className: "num",
         type: "number",
+        inputMode: "decimal",
         defaultValue: ((settings.manualBaseline || 0) / 100).toFixed(0),
         onBlur: setMoney("manualBaseline")
       }
-    )), /* @__PURE__ */ React.createElement("div", { className: "mono small" }, "\u2192 Safe-to-Budget resolves to ", /* @__PURE__ */ React.createElement("b", null, money(baseline.value)), "\xA0(avg3 ", money(baseline.avg3), " \xB7 low ", money(baseline.low), ")")), /* @__PURE__ */ React.createElement("section", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "cardhead" }, /* @__PURE__ */ React.createElement("span", null, "Cushion & target")), /* @__PURE__ */ React.createElement("label", { className: "mono block" }, "liquid cushion $", /* @__PURE__ */ React.createElement(
+    ))), /* @__PURE__ */ React.createElement("section", { className: "card" }, /* @__PURE__ */ React.createElement("h3", null, "Safety net"), /* @__PURE__ */ React.createElement("div", { className: "field" }, /* @__PURE__ */ React.createElement("label", null, "Cash cushion", /* @__PURE__ */ React.createElement("span", { className: "f-sub" }, "checking + savings you could spend")), /* @__PURE__ */ React.createElement(
       "input",
       {
         key: "lc" + rev,
-        className: "num",
         type: "number",
+        inputMode: "decimal",
         defaultValue: (settings.liquidCushion / 100).toFixed(0),
         onBlur: setMoney("liquidCushion")
       }
-    )), /* @__PURE__ */ React.createElement("label", { className: "mono block" }, "target runway (months)", /* @__PURE__ */ React.createElement(
+    )), /* @__PURE__ */ React.createElement("div", { className: "field" }, /* @__PURE__ */ React.createElement("label", null, "Goal", /* @__PURE__ */ React.createElement("span", { className: "f-sub" }, "months it should cover")), /* @__PURE__ */ React.createElement(
       "input",
       {
         key: "tr" + rev,
-        className: "num",
         type: "number",
+        inputMode: "numeric",
         defaultValue: settings.targetRunway,
         onBlur: (e) => {
           const n = parseInt(e.target.value, 10);
           if (isFinite(n) && n > 0) setSetting("targetRunway", n);
         }
       }
-    ))), /* @__PURE__ */ React.createElement("section", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "cardhead" }, /* @__PURE__ */ React.createElement("span", null, "Data (local-first)")), /* @__PURE__ */ React.createElement("div", { className: "btnrow" }, /* @__PURE__ */ React.createElement("button", { onClick: exportJSON }, "\u2B07 Export JSON"), /* @__PURE__ */ React.createElement("label", { className: "filebtn" }, "\u2B06 Import JSON", /* @__PURE__ */ React.createElement(
+    ))), /* @__PURE__ */ React.createElement("section", { className: "card" }, /* @__PURE__ */ React.createElement("h3", null, "Your data"), /* @__PURE__ */ React.createElement("div", { className: "sub" }, "Everything lives on this device. Nothing is sent anywhere unless you export it."), /* @__PURE__ */ React.createElement("div", { className: "btn-row" }, /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: exportJSON }, "Export backup"), /* @__PURE__ */ React.createElement("label", { className: "btn quiet filelabel" }, "Import backup", /* @__PURE__ */ React.createElement(
       "input",
       {
         type: "file",
@@ -1491,13 +1703,9 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
         style: { display: "none" },
         onChange: (e) => e.target.files[0] && importJSON(e.target.files[0])
       }
-    )), /* @__PURE__ */ React.createElement("button", { className: "ghost", onClick: () => {
-      if (confirm("Reset to the four seeded months?")) resetSeed();
-    } }, "\u21BA Reset to seed")), /* @__PURE__ */ React.createElement("div", { className: "mono small" }, "Persistence: ", STORE.label, ". Nothing leaves this device unless you export it.")), /* @__PURE__ */ React.createElement("section", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "cardhead" }, /* @__PURE__ */ React.createElement("span", null, "About")), /* @__PURE__ */ React.createElement("div", { className: "mono small" }, "This app informs; it does not advise. It is a decision-support tool, ", /* @__PURE__ */ React.createElement("b", null, "not licensed financial advice"), ". All money is stored as integer cents; totals are derived, never stored. Schema v", SCHEMA_VERSION, ".")));
-  }
-  function Tests() {
-    const res = useMemo(() => window.runBudgetTests(C, window.BudgetTestSeed || SEED), []);
-    return /* @__PURE__ */ React.createElement("div", { className: "screen" }, /* @__PURE__ */ React.createElement("section", { className: "card " + (res.fail === 0 ? "greencard" : "redcard") }, /* @__PURE__ */ React.createElement("div", { className: "cardhead" }, /* @__PURE__ */ React.createElement("span", null, "Self-check"), /* @__PURE__ */ React.createElement("span", { className: "big" }, res.pass, "/", res.pass + res.fail, " pass")), /* @__PURE__ */ React.createElement("div", { className: "mono small" }, "Same math the app renders with (\xA77). Green = the numbers you see are trustworthy.")), /* @__PURE__ */ React.createElement("section", { className: "card" }, res.log.map(([status, name], i) => /* @__PURE__ */ React.createElement("div", { key: i, className: "testrow mono " + status }, /* @__PURE__ */ React.createElement("span", null, status === "ok" ? "\u2713" : "\u2717"), /* @__PURE__ */ React.createElement("span", null, name)))));
+    )), /* @__PURE__ */ React.createElement("button", { className: "btn danger-quiet", onClick: () => {
+      if (confirm("Erase everything and start over?")) resetSeed();
+    } }, "Start over"))), /* @__PURE__ */ React.createElement("section", { className: "card" }, /* @__PURE__ */ React.createElement("h3", null, "Self-check"), /* @__PURE__ */ React.createElement("div", { className: "sub" }, "Runs the app's money-math test suite right here, so you can verify the numbers you see are computed correctly."), /* @__PURE__ */ React.createElement("div", { className: "btn-row" }, /* @__PURE__ */ React.createElement("button", { className: "btn quiet", onClick: runCheck }, "Run self-check")), check && /* @__PURE__ */ React.createElement("div", { className: "selfcheck" }, check.fail === 0 ? /* @__PURE__ */ React.createElement("span", { className: "tag ok" }, "\u2713 all ", check.pass, " checks passed") : /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("span", { className: "tag over" }, "\u2715 ", check.fail, " failed"), /* @__PURE__ */ React.createElement("div", { className: "fails" }, check.log.filter((l) => l[0] === "fail").map((l) => l[1]).join("\n"))))), /* @__PURE__ */ React.createElement("section", { className: "card" }, /* @__PURE__ */ React.createElement("h3", null, "About"), /* @__PURE__ */ React.createElement("div", { className: "sub" }, "Budget Receipt is a decision-support tool, not licensed financial advice. Money is stored as exact cents; totals are always recomputed from your transactions, never stored.")), /* @__PURE__ */ React.createElement("div", { className: "footnote" }, "local-first \xB7 exact cents \xB7 totals derived, never stored \xB7 ", STORE.label, STORE.corrupted ? " \xB7 \u26A0 previous save was unreadable \u2014 a backup copy was kept" : ""));
   }
   ReactDOM.createRoot(document.getElementById("root")).render(
     /* @__PURE__ */ React.createElement(Boundary, null, /* @__PURE__ */ React.createElement(App, null))
