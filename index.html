@@ -218,6 +218,15 @@ h2.screen-title{font-size:22px;font-weight:700;margin:14px 0 2px}
 .sheet{max-height:88vh;overflow:auto}
 .save:disabled{opacity:.5}
 
+/* delete + kind toggles */
+.delx{border:none;background:var(--page);color:var(--muted);width:30px;height:30px;border-radius:9px;
+  font-size:19px;line-height:1;cursor:pointer;flex:0 0 auto;border:1px solid var(--ring)}
+.delx.armed{width:auto;padding:0 10px;background:var(--crit);border-color:var(--crit);color:#fff;
+  font-size:12.5px;font-weight:700}
+.s-controls{display:flex;gap:6px;margin-top:3px;flex-wrap:wrap}
+.kindpick{max-width:96px}
+.s-amt.ref-amt{color:var(--good-text)}
+
 </style>
 </head>
 <body>
@@ -981,6 +990,224 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
 })(typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : this));
 
 </script>
+<script>/* encrypted multi-device sync (merge + crypto + transport) */
+/* =====================================================================
+   SYNC — encrypted multi-device sync through the user's own private
+   GitHub repo. Design rules:
+     · End-to-end encrypted: AES-GCM with a key derived (PBKDF2) from a
+       passphrase that never leaves the device. GitHub stores ciphertext.
+     · Merge, don't clobber: transactions/income union by id, deletions
+       carried as tombstones so a delete on one device sticks everywhere.
+     · Sync config (token/passphrase) lives in ITS OWN storage key and is
+       never part of the exported/synced data blob.
+   mergeData is pure and unit-tested; crypto + transport are thin.
+   ===================================================================== */
+(function (root) {
+  "use strict";
+
+  /* ---------------- merge (pure) ---------------- */
+  function unionById(a, b, dead) {
+    var seen = {}, out = [];
+    (a || []).concat(b || []).forEach(function (item) {
+      if (!item || !item.id || seen[item.id] || dead[item.id]) return;
+      seen[item.id] = 1; out.push(item);
+    });
+    return out;
+  }
+  function unionList(a, b) {
+    var seen = {}, out = [];
+    (a || []).concat(b || []).forEach(function (id) {
+      if (!seen[id]) { seen[id] = 1; out.push(id); }
+    });
+    return out;
+  }
+  // local & remote are full data blobs (or null). Newer updatedAt wins for
+  // scalar state; records union by id minus tombstones from EITHER side.
+  function mergeData(local, remote) {
+    if (!local) return remote;
+    if (!remote) return local;
+    var newer = (local.updatedAt || 0) >= (remote.updatedAt || 0) ? local : remote;
+    var delTx = unionList(local.deleted && local.deleted.txns, remote.deleted && remote.deleted.txns);
+    var delIn = unionList(local.deleted && local.deleted.income, remote.deleted && remote.deleted.income);
+    var deadTx = {}; delTx.forEach(function (id) { deadTx[id] = 1; });
+    var deadIn = {}; delIn.forEach(function (id) { deadIn[id] = 1; });
+    var merged = JSON.parse(JSON.stringify(newer));
+    merged.txns = unionById(local.txns, remote.txns, deadTx)
+      .sort(function (a, b) { return a.date < b.date ? -1 : a.date > b.date ? 1 : 0; });
+    merged.income = unionById(local.income, remote.income, deadIn)
+      .sort(function (a, b) { return a.date < b.date ? -1 : a.date > b.date ? 1 : 0; });
+    merged.deleted = { txns: delTx.slice(-1000), income: delIn.slice(-1000) };
+    merged.updatedAt = Math.max(local.updatedAt || 0, remote.updatedAt || 0);
+    return merged;
+  }
+
+  /* ---------------- crypto (WebCrypto, async) ---------------- */
+  var subtle = (root.crypto && root.crypto.subtle) ? root.crypto.subtle : null;
+  var enc = new TextEncoder(), dec = new TextDecoder();
+  function b64(buf) {
+    var bytes = new Uint8Array(buf), s = "";
+    for (var i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+    return btoa(s);
+  }
+  function unb64(s) {
+    var bin = atob(s), bytes = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return bytes;
+  }
+  function deriveKey(passphrase, salt) {
+    return subtle.importKey("raw", enc.encode(passphrase), "PBKDF2", false, ["deriveKey"])
+      .then(function (base) {
+        return subtle.deriveKey(
+          { name: "PBKDF2", salt: salt, iterations: 210000, hash: "SHA-256" },
+          base, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+      });
+  }
+  function encryptJSON(obj, passphrase) {
+    var salt = root.crypto.getRandomValues(new Uint8Array(16));
+    var iv = root.crypto.getRandomValues(new Uint8Array(12));
+    return deriveKey(passphrase, salt).then(function (key) {
+      return subtle.encrypt({ name: "AES-GCM", iv: iv }, key, enc.encode(JSON.stringify(obj)));
+    }).then(function (ct) {
+      return { v: 1, kdf: "PBKDF2-SHA256-210k", salt: b64(salt), iv: b64(iv), ct: b64(ct) };
+    });
+  }
+  function decryptJSON(payload, passphrase) {
+    return deriveKey(passphrase, unb64(payload.salt)).then(function (key) {
+      return subtle.decrypt({ name: "AES-GCM", iv: unb64(payload.iv) }, key, unb64(payload.ct));
+    }).then(function (pt) { return JSON.parse(dec.decode(pt)); });
+  }
+
+  /* ---------------- GitHub transport ---------------- */
+  var PATH = "budget.enc.json";
+  function ghUrl(cfg) {
+    return "https://api.github.com/repos/" + cfg.repo + "/contents/" + PATH;
+  }
+  function ghHeaders(cfg) {
+    return {
+      "Authorization": "Bearer " + cfg.token,
+      "Accept": "application/vnd.github+json",
+      "Content-Type": "application/json",
+    };
+  }
+  // -> { payload|null, sha|null }; throws on auth/network problems
+  function pull(cfg) {
+    return fetch(ghUrl(cfg), { headers: ghHeaders(cfg) }).then(function (r) {
+      if (r.status === 404) return { payload: null, sha: null };  // first sync ever
+      if (!r.ok) throw new Error("GitHub said " + r.status + " — check repo name & token");
+      return r.json().then(function (j) {
+        var raw = atob((j.content || "").replace(/\n/g, ""));
+        return { payload: JSON.parse(raw), sha: j.sha };
+      });
+    });
+  }
+  function push(cfg, payload, sha) {
+    var body = {
+      message: "sync " + new Date().toISOString(),
+      content: btoa(JSON.stringify(payload)),
+    };
+    if (sha) body.sha = sha;
+    return fetch(ghUrl(cfg), { method: "PUT", headers: ghHeaders(cfg), body: JSON.stringify(body) })
+      .then(function (r) {
+        if (r.status === 409 || r.status === 422) return { conflict: true };
+        if (!r.ok) throw new Error("GitHub said " + r.status + " on save — check token permissions");
+        return { conflict: false };
+      });
+  }
+
+  /* ---------------- the sync cycle ---------------- */
+  // pull -> decrypt -> merge with local -> encrypt -> push (retry once on
+  // conflict). Returns { data, pushed } — data is what the app should use.
+  function syncNow(cfg, localData, attempt) {
+    return pull(cfg).then(function (got) {
+      var remoteData = null;
+      var decP = got.payload
+        ? decryptJSON(got.payload, cfg.pass).catch(function () {
+            throw new Error("Couldn't decrypt — is the passphrase the same on both devices?");
+          })
+        : Promise.resolve(null);
+      return decP.then(function (rd) {
+        remoteData = rd;
+        var merged = mergeData(localData, remoteData);
+        var same = remoteData && JSON.stringify(merged) === JSON.stringify(remoteData);
+        if (same) return { data: merged, pushed: false };
+        return encryptJSON(merged, cfg.pass).then(function (payload) {
+          return push(cfg, payload, got.sha).then(function (res) {
+            if (res.conflict) {
+              if (attempt >= 1) throw new Error("Sync conflict — try again in a moment");
+              return syncNow(cfg, merged, 1);   // someone else pushed; re-pull & merge
+            }
+            return { data: merged, pushed: true };
+          });
+        });
+      });
+    });
+  }
+
+  var api = { mergeData: mergeData, encryptJSON: encryptJSON, decryptJSON: decryptJSON,
+    pull: pull, push: push, syncNow: syncNow, PATH: PATH };
+  if (typeof module !== "undefined" && module.exports) module.exports = api;
+  else root.BudgetSync = api;
+})(typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : this));
+
+</script>
+<script>/* sync merge tests */
+/* Merge-logic tests (pure, sync) — folded into the in-app self-check.
+   Crypto roundtrip is async and verified separately (node + headless). */
+(function (root) {
+  "use strict";
+  function runSyncTests(S) {
+    var pass = 0, fail = 0, log = [];
+    function ok(name, cond, detail) {
+      if (cond) { pass++; log.push(["ok", name]); }
+      else { fail++; log.push(["fail", name + (detail ? "  [" + detail + "]" : "")]); }
+    }
+    function eq(name, got, want) { ok(name, got === want, "got " + JSON.stringify(got) + " want " + JSON.stringify(want)); }
+
+    var base = { settings: { liquidCushion: 100 }, categories: [], overrides: {}, merchantMap: {},
+      sinkingFunds: [], deleted: { txns: [], income: [] } };
+    function mk(over) { return Object.assign(JSON.parse(JSON.stringify(base)), over); }
+
+    /* union by id: a txn added on each device survives on both */
+    var a = mk({ updatedAt: 2, txns: [{ id: "t1", date: "2026-07-01", amount: 100 }], income: [] });
+    var b = mk({ updatedAt: 1, txns: [{ id: "t2", date: "2026-07-02", amount: 200 }], income: [] });
+    var m = S.mergeData(a, b);
+    eq("merge unions txns from both devices", m.txns.length, 2);
+    ok("merge keeps chronological order", m.txns[0].id === "t1" && m.txns[1].id === "t2");
+
+    /* tombstones: a delete on one device sticks everywhere */
+    var c = mk({ updatedAt: 3, txns: [], income: [], deleted: { txns: ["t1"], income: [] } });
+    var d = mk({ updatedAt: 2, txns: [{ id: "t1", date: "2026-07-01", amount: 100 }], income: [] });
+    var m2 = S.mergeData(c, d);
+    eq("deleted txn does NOT resurrect from a stale device", m2.txns.length, 0);
+    eq("tombstone carried forward", m2.deleted.txns[0], "t1");
+
+    /* newer scalar state wins */
+    var e = mk({ updatedAt: 10, settings: { liquidCushion: 999 }, txns: [], income: [] });
+    var f = mk({ updatedAt: 5, settings: { liquidCushion: 111 }, txns: [], income: [] });
+    eq("newer settings win", S.mergeData(e, f).settings.liquidCushion, 999);
+    eq("order of args doesn't matter", S.mergeData(f, e).settings.liquidCushion, 999);
+
+    /* null sides */
+    ok("merge(local, null) = local", S.mergeData(e, null) === e);
+    ok("merge(null, remote) = remote", S.mergeData(null, f) === f);
+
+    /* duplicate ids never double */
+    var g = mk({ updatedAt: 1, txns: [{ id: "x", date: "2026-07-01", amount: 5 }], income: [] });
+    var h = mk({ updatedAt: 2, txns: [{ id: "x", date: "2026-07-01", amount: 5 }], income: [] });
+    eq("same txn on both devices stays single", S.mergeData(g, h).txns.length, 1);
+
+    /* income tombstones too */
+    var i1 = mk({ updatedAt: 2, txns: [], income: [{ id: "i1", date: "2026-07-01", amount: 7 }] });
+    var i2 = mk({ updatedAt: 3, txns: [], income: [], deleted: { txns: [], income: ["i1"] } });
+    eq("deleted income stays deleted", S.mergeData(i1, i2).income.length, 0);
+
+    return { pass: pass, fail: fail, log: log };
+  }
+  if (typeof module !== "undefined" && module.exports) module.exports = { runSyncTests: runSyncTests };
+  else root.runSyncTests = runSyncTests;
+})(typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : this));
+
+</script>
 <script>/* receipt & screenshot parser */
 /* =====================================================================
    RECEIPT / SCREENSHOT PARSER — pure functions, no DOM, no OCR here.
@@ -1101,6 +1328,15 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
 
   /* ---------- list mode (bank screenshots: label + amount rows) ---------- */
   var ROW_EXCLUDE = /\b(available|balance|pending\s*balance|credit\s*limit|limit|rewards?|cash\s*back|round\s*-?\s*ups?|save\s*when|spending\s*account|checking|savings|total)\b/i;
+  // income even without a "+" sign: payroll & deposit language
+  var INCOME_HINT = /\b(direct\s*dep(osit)?|payroll|paycheck|pay\s*check|salary|deposit|dd\s*payment|transfer\s*(in|from)|zelle\s*from|venmo\s*from|payment\s*from)\b/i;
+  // merchant refunds reduce the category's spend — they are NOT income (§8)
+  var REFUND_HINT = /\b(refund(ed)?|return(ed)?|reversal|chargeback|credit\s*memo)\b/i;
+  function classifyRow(label, pos) {
+    if (REFUND_HINT.test(label)) return "refund";
+    if (pos || INCOME_HINT.test(label)) return "income";
+    return "spend";
+  }
 
   function parseListRows(lines) {
     var rows = [];
@@ -1124,7 +1360,7 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
       rows.push({
         label: label.slice(0, 40),
         cents: t.cents,
-        kind: t.pos ? "income" : "spend",             // "+$500" reads as a deposit
+        kind: classifyRow(label, t.pos),
       });
     }
     return rows;
@@ -1202,7 +1438,7 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
   }
 
   var api = {
-    parseCapture: parseCapture, parseListRows: parseListRows, findTotal: findTotal,
+    parseCapture: parseCapture, parseListRows: parseListRows, findTotal: findTotal, classifyRow: classifyRow,
     findDate: findDate, guessMerchant: guessMerchant, guessCategory: guessCategory,
     normMerchant: normMerchant, cleanLines: cleanLines,
   };
@@ -1293,6 +1529,16 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
     eq("chimeTx: deposit detected as income", dep.length, 1);
     eq("chimeTx: deposit cents", dep[0].cents, 125000);
     eq("chimeTx: merchant label carried from prev line", ct.rows[0].label, "Fred Meyer");
+
+    /* --- income & refund detection without a "+" sign --- */
+    var payroll = R.parseCapture(
+      "Transactions\nPayroll ACME LLC\n$1,250.00\nFred Meyer\n-$38.42\nAmazon Refund\n$21.99\nMobile Check Deposit\n$300.00", TODAY);
+    eq("payroll (no plus) => income", payroll.rows[0].kind, "income");
+    eq("plain spend stays spend", payroll.rows[1].kind, "spend");
+    eq("refund detected as refund (reduces spend, not income)", payroll.rows[2].kind, "refund");
+    eq("check deposit => income", payroll.rows[3].kind, "income");
+    eq("classifyRow spend default", R.classifyRow("Chevron", false), "spend");
+    eq("classifyRow + sign wins", R.classifyRow("Something", true), "income");
 
     /* --- garbage in, empty out (no NaN, no crash) --- */
     eq("empty text", R.parseCapture("", TODAY).mode, "empty");
@@ -1425,7 +1671,7 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
   const C = window.BudgetCore;
   const SEED = window.BudgetSeed;
   const STORE = window.BudgetStorage;
-  const SCHEMA_VERSION = 3;
+  const SCHEMA_VERSION = 4;
   const MIGRATIONS = [
     function v1_to_v2(data) {
       if (!data.sinkingFunds) data.sinkingFunds = JSON.parse(JSON.stringify(SEED.sinkingFunds));
@@ -1434,8 +1680,26 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
     function v2_to_v3(data) {
       if (!data.merchantMap) data.merchantMap = {};
       data.schemaVersion = 3;
+    },
+    function v3_to_v4(data) {
+      if (!data.deleted) data.deleted = { txns: [], income: [] };
+      data.schemaVersion = 4;
     }
   ];
+  const SYNC_KEY = "budget:sync:v1";
+  function loadSyncCfg() {
+    try {
+      return JSON.parse(localStorage.getItem(SYNC_KEY)) || null;
+    } catch (e) {
+      return null;
+    }
+  }
+  function saveSyncCfg(cfg) {
+    try {
+      localStorage.setItem(SYNC_KEY, JSON.stringify(cfg));
+    } catch (e) {
+    }
+  }
   function applyMigrations(data) {
     let v = data.schemaVersion || 1;
     while (v < SCHEMA_VERSION && MIGRATIONS[v - 1]) {
@@ -1458,6 +1722,7 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
       sinkingFunds: JSON.parse(JSON.stringify(s.sinkingFunds)),
       overrides: {},
       merchantMap: {},
+      deleted: { txns: [], income: [] },
       schemaVersion: s.schemaVersion
     });
   }
@@ -1500,20 +1765,64 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
     const [tab, setTab] = useState("home");
     const [rev, setRev] = useState(0);
     const saveTimer = useRef(null);
+    const dataRef = useRef(null);
+    const syncTimer = useRef(null);
+    const [syncCfg, setSyncCfgState] = useState(loadSyncCfg);
+    const syncCfgRef = useRef(syncCfg);
+    const [syncInfo, setSyncInfo] = useState({ running: false, err: false, msg: "" });
+    const runSync = useCallback(async () => {
+      const cfg = syncCfgRef.current;
+      if (!cfg || !cfg.enabled || !cfg.repo || !cfg.token || !cfg.pass) return;
+      if (!window.BudgetSync || !dataRef.current) return;
+      setSyncInfo((s) => ({ ...s, running: true, err: false, msg: "Syncing\u2026" }));
+      try {
+        const res = await window.BudgetSync.syncNow(cfg, dataRef.current, 0);
+        if (JSON.stringify(res.data) !== JSON.stringify(dataRef.current)) {
+          dataRef.current = res.data;
+          setDataRaw(res.data);
+          try {
+            STORE.save(res.data);
+          } catch (e) {
+          }
+          setRev((n) => n + 1);
+        }
+        setSyncInfo({
+          running: false,
+          err: false,
+          msg: "Synced " + (/* @__PURE__ */ new Date()).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+        });
+      } catch (e) {
+        setSyncInfo({ running: false, err: true, msg: String(e && e.message || e) });
+      }
+    }, []);
+    const setSyncCfg = useCallback((cfg) => {
+      syncCfgRef.current = cfg;
+      setSyncCfgState(cfg);
+      saveSyncCfg(cfg);
+    }, []);
     useEffect(() => {
       let live = true;
       STORE.load().then((persisted) => {
         if (!live) return;
-        if (persisted && validShape(persisted)) setDataRaw(applyMigrations(persisted));
-        else setDataRaw(freshData());
-      }).catch(() => live && setDataRaw(freshData()));
+        const d = persisted && validShape(persisted) ? applyMigrations(persisted) : freshData();
+        dataRef.current = d;
+        setDataRaw(d);
+        runSync();
+      }).catch(() => {
+        if (!live) return;
+        const d = freshData();
+        dataRef.current = d;
+        setDataRaw(d);
+      });
       return () => {
         live = false;
       };
-    }, []);
+    }, [runSync]);
     const setData = useCallback((updater) => {
       setDataRaw((prev) => {
-        const next = typeof updater === "function" ? updater(prev) : updater;
+        let next = typeof updater === "function" ? updater(prev) : updater;
+        next = { ...next, updatedAt: Date.now() };
+        dataRef.current = next;
         clearTimeout(saveTimer.current);
         saveTimer.current = setTimeout(() => {
           try {
@@ -1521,16 +1830,19 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
           } catch (e) {
           }
         }, 250);
+        clearTimeout(syncTimer.current);
+        syncTimer.current = setTimeout(runSync, 2500);
         return next;
       });
-    }, []);
+    }, [runSync]);
     if (data === null) return /* @__PURE__ */ React.createElement("div", { className: "shell" }, /* @__PURE__ */ React.createElement("div", { className: "boot" }, "opening your budget\u2026"));
-    return /* @__PURE__ */ React.createElement(Main, { ...{ data, setData, tab, setTab, rev, setRev } });
+    return /* @__PURE__ */ React.createElement(Main, { ...{ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, syncInfo, runSync } });
   }
-  function Main({ data, setData, tab, setTab, rev, setRev }) {
+  function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, syncInfo, runSync }) {
     const { categories, txns, income, settings, overrides, sinkingFunds } = data;
     const merchantMap = data.merchantMap || {};
     const [sheetOpen, setSheetOpen] = useState(false);
+    const [actView, setActView] = useState("spend");
     const dataMonths = useMemo(() => C.monthsWithData(income, txns), [income, txns]);
     const allMonths = useMemo(() => {
       const set = {};
@@ -1618,10 +1930,11 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
           if (r.kind === "income") {
             income2.push({ id: "i" + Date.now() + i, date: dateISO, amount: r.cents, source: r.label });
           } else {
+            const amount = r.kind === "refund" ? -r.cents : r.cents;
             txns2.push({
               id: "t" + Date.now() + i,
               date: dateISO,
-              amount: r.cents,
+              amount,
               categoryId: r.categoryId || null,
               merchant: r.label
             });
@@ -1643,6 +1956,22 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
       }] }));
       return true;
     };
+    const deleteTxn = (txnId) => setData((d) => ({
+      ...d,
+      txns: d.txns.filter((t) => t.id !== txnId),
+      deleted: {
+        txns: [...(d.deleted || {}).txns || [], txnId].slice(-1e3),
+        income: (d.deleted || {}).income || []
+      }
+    }));
+    const deleteIncome = (incId) => setData((d) => ({
+      ...d,
+      income: d.income.filter((e) => e.id !== incId),
+      deleted: {
+        txns: (d.deleted || {}).txns || [],
+        income: [...(d.deleted || {}).income || [], incId].slice(-1e3)
+      }
+    }));
     const recategorize = (txnId, catId) => setData((d) => {
       const txn = d.txns.find((t) => t.id === txnId);
       return {
@@ -1718,7 +2047,23 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
       ["funds", "Funds", "\u25CD"],
       ["settings", "Settings", "\u2699"]
     ];
-    return /* @__PURE__ */ React.createElement("div", { className: "shell" }, /* @__PURE__ */ React.createElement("header", { className: "top" }, /* @__PURE__ */ React.createElement("div", { className: "logo" }, "BUDGET ", /* @__PURE__ */ React.createElement("span", { className: "scissor" }, "\u2702"), " RECEIPT"), /* @__PURE__ */ React.createElement("label", { className: "monthchip" }, /* @__PURE__ */ React.createElement("select", { value: month, onChange: (e) => setMonth(e.target.value), "aria-label": "Month" }, allMonths.map((m) => /* @__PURE__ */ React.createElement("option", { key: m, value: m }, monthLabel(m), m === CURRENT_MONTH ? " (now)" : ""))))), tab === "home" && /* @__PURE__ */ React.createElement(Home, { ...shared }), tab === "budget" && /* @__PURE__ */ React.createElement(Budget, { ...shared }), tab === "activity" && /* @__PURE__ */ React.createElement(Activity, { ...shared, openAdd: () => setSheetOpen(true) }), tab === "funds" && /* @__PURE__ */ React.createElement(Funds, { ...shared }), tab === "settings" && /* @__PURE__ */ React.createElement(Settings, { ...shared, ...{ setSetting, exportJSON, importJSON, resetSeed } }), (tab === "home" || tab === "budget" || tab === "activity") && /* @__PURE__ */ React.createElement("button", { className: "addbtn", "aria-label": "Add transaction", onClick: () => setSheetOpen(true) }, "+"), sheetOpen && /* @__PURE__ */ React.createElement(AddSheet, { ...{ month, addTxn, addIncome, addBatch, categories, merchantMap }, close: () => setSheetOpen(false) }), /* @__PURE__ */ React.createElement("nav", { className: "tabbar" }, /* @__PURE__ */ React.createElement("div", { className: "tabbar-inner" }, TABS.map(([id, label, ic]) => /* @__PURE__ */ React.createElement("button", { key: id, className: "tb" + (tab === id ? " on" : ""), onClick: () => setTab(id) }, /* @__PURE__ */ React.createElement("span", { className: "tb-ic" }, ic), /* @__PURE__ */ React.createElement("span", { className: "tb-label" }, label), id === "activity" && uncat !== 0 ? /* @__PURE__ */ React.createElement("span", { className: "dot" }) : null)))));
+    return /* @__PURE__ */ React.createElement("div", { className: "shell" }, /* @__PURE__ */ React.createElement("header", { className: "top" }, /* @__PURE__ */ React.createElement("div", { className: "logo" }, "BUDGET ", /* @__PURE__ */ React.createElement("span", { className: "scissor" }, "\u2702"), " RECEIPT"), /* @__PURE__ */ React.createElement("label", { className: "monthchip" }, /* @__PURE__ */ React.createElement("select", { value: month, onChange: (e) => setMonth(e.target.value), "aria-label": "Month" }, allMonths.map((m) => /* @__PURE__ */ React.createElement("option", { key: m, value: m }, monthLabel(m), m === CURRENT_MONTH ? " (now)" : ""))))), tab === "home" && /* @__PURE__ */ React.createElement(Home, { ...shared }), tab === "budget" && /* @__PURE__ */ React.createElement(Budget, { ...shared }), tab === "activity" && /* @__PURE__ */ React.createElement(
+      Activity,
+      {
+        ...shared,
+        ...{ deleteTxn, deleteIncome },
+        view: actView,
+        setView: setActView,
+        openAdd: () => setSheetOpen(true)
+      }
+    ), tab === "funds" && /* @__PURE__ */ React.createElement(Funds, { ...shared }), tab === "settings" && /* @__PURE__ */ React.createElement(Settings, { ...shared, ...{ setSetting, exportJSON, importJSON, resetSeed, syncCfg, setSyncCfg, syncInfo, runSync } }), (tab === "home" || tab === "budget" || tab === "activity") && /* @__PURE__ */ React.createElement("button", { className: "addbtn", "aria-label": "Add transaction", onClick: () => setSheetOpen(true) }, "+"), sheetOpen && /* @__PURE__ */ React.createElement(
+      AddSheet,
+      {
+        ...{ month, addTxn, addIncome, addBatch, categories, merchantMap },
+        initialKind: tab === "activity" && actView === "income" ? "income" : "spend",
+        close: () => setSheetOpen(false)
+      }
+    ), /* @__PURE__ */ React.createElement("nav", { className: "tabbar" }, /* @__PURE__ */ React.createElement("div", { className: "tabbar-inner" }, TABS.map(([id, label, ic]) => /* @__PURE__ */ React.createElement("button", { key: id, className: "tb" + (tab === id ? " on" : ""), onClick: () => setTab(id) }, /* @__PURE__ */ React.createElement("span", { className: "tb-ic" }, ic), /* @__PURE__ */ React.createElement("span", { className: "tb-label" }, label), id === "activity" && uncat !== 0 ? /* @__PURE__ */ React.createElement("span", { className: "dot" }) : null)))));
   }
   function Home(p) {
     const {
@@ -1943,9 +2288,34 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
       }));
     }));
   }
+  function DeleteX({ onDelete }) {
+    const [armed, setArmed] = useState(false);
+    const timer = useRef(null);
+    useEffect(() => () => clearTimeout(timer.current), []);
+    if (!armed) {
+      return /* @__PURE__ */ React.createElement("button", { className: "delx", "aria-label": "Delete", onClick: () => {
+        setArmed(true);
+        timer.current = setTimeout(() => setArmed(false), 2500);
+      } }, "\xD7");
+    }
+    return /* @__PURE__ */ React.createElement("button", { className: "delx armed", onClick: () => {
+      clearTimeout(timer.current);
+      onDelete();
+    } }, "Delete?");
+  }
   function Activity(p) {
-    const { txns, income, categories, month, recategorize, uncat } = p;
-    const [view, setView] = useState("spend");
+    const {
+      txns,
+      income,
+      categories,
+      month,
+      recategorize,
+      uncat,
+      deleteTxn,
+      deleteIncome,
+      view,
+      setView
+    } = p;
     const [showAll, setShowAll] = useState(false);
     const opts = [/* @__PURE__ */ React.createElement("option", { key: "_", value: "" }, "\u{1F3F7} needs a label")].concat(
       categories.map((c) => /* @__PURE__ */ React.createElement("option", { key: c.id, value: c.id }, c.icon, " ", c.name))
@@ -1964,8 +2334,8 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
           "aria-label": "Category"
         },
         opts
-      ));
-    })), view === "income" && /* @__PURE__ */ React.createElement("section", { className: "card" }, incomeList.length === 0 && /* @__PURE__ */ React.createElement("div", { className: "empty" }, /* @__PURE__ */ React.createElement("span", { className: "e-ic" }, "\u{1F4B5}"), "No deposits logged", showAll ? "" : " in " + monthLabel(month), ".", /* @__PURE__ */ React.createElement("br", null), "Tap +, switch to Income, and add one \u2014 your whole plan is built on it."), incomeList.map((e) => /* @__PURE__ */ React.createElement("div", { key: e.id, className: "txrow" }, /* @__PURE__ */ React.createElement("div", { className: "tx-main" }, /* @__PURE__ */ React.createElement("div", { className: "tx-merch" }, e.source || "Deposit"), /* @__PURE__ */ React.createElement("div", { className: "tx-date" }, monthShort(C.monthOf(e.date)), " ", +e.date.slice(8, 10))), /* @__PURE__ */ React.createElement("span", { className: "tx-amt refund" }, "+", money(e.amount))))));
+      ), /* @__PURE__ */ React.createElement(DeleteX, { onDelete: () => deleteTxn(t.id) }));
+    })), view === "income" && /* @__PURE__ */ React.createElement("section", { className: "card" }, incomeList.length === 0 && /* @__PURE__ */ React.createElement("div", { className: "empty" }, /* @__PURE__ */ React.createElement("span", { className: "e-ic" }, "\u{1F4B5}"), "No deposits logged", showAll ? "" : " in " + monthLabel(month), ".", /* @__PURE__ */ React.createElement("br", null), "Tap +, switch to Income, and add one \u2014 your whole plan is built on it."), incomeList.map((e) => /* @__PURE__ */ React.createElement("div", { key: e.id, className: "txrow" }, /* @__PURE__ */ React.createElement("div", { className: "tx-main" }, /* @__PURE__ */ React.createElement("div", { className: "tx-merch" }, e.source || "Deposit"), /* @__PURE__ */ React.createElement("div", { className: "tx-date" }, monthShort(C.monthOf(e.date)), " ", +e.date.slice(8, 10))), /* @__PURE__ */ React.createElement("span", { className: "tx-amt refund" }, "+", money(e.amount)), /* @__PURE__ */ React.createElement(DeleteX, { onDelete: () => deleteIncome(e.id) })))));
   }
   const TESSERACT_CDN = "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js";
   function loadTesseract() {
@@ -2002,16 +2372,21 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
     ctx.putImageData(d, 0, 0);
     return canvas;
   }
-  function AddSheet({ month, addTxn, addIncome, addBatch, categories, merchantMap, close }) {
-    const [kind, setKind] = useState("spend");
+  function AddSheet({ month, addTxn, addIncome, addBatch, categories, merchantMap, initialKind, close }) {
+    const [kind, setKind] = useState(initialKind || "spend");
     const defaultDate = month === CURRENT_MONTH ? TODAY : month + "-15";
     const [form, setForm] = useState({ date: defaultDate, merchant: "", amount: "", categoryId: "" });
     const [scan, setScan] = useState({ phase: "idle", progress: 0, msg: "" });
     const [rows, setRows] = useState(null);
     const [rowsDate, setRowsDate] = useState(defaultDate);
+    const [saveErr, setSaveErr] = useState("");
     const save = () => {
       const ok = (kind === "income" ? addIncome : addTxn)(form);
-      if (ok) close();
+      if (ok) {
+        close();
+        return;
+      }
+      setSaveErr(kind === "income" ? "Income needs an amount greater than $0 and a date." : "Enter a valid amount (numbers only) and a date.");
     };
     const handleParsed = (text) => {
       const R = window.BudgetReceipt;
@@ -2036,7 +2411,7 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
         setRows(parsed.rows.map((r) => ({
           ...r,
           include: true,
-          categoryId: r.kind === "spend" ? R.guessCategory(r.label, categories, merchantMap) || "" : ""
+          categoryId: r.kind !== "income" ? R.guessCategory(r.label, categories, merchantMap) || "" : ""
         })));
         setScan({ phase: "done", progress: 100, msg: "" });
       } else {
@@ -2110,7 +2485,17 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
         checked: r.include,
         onChange: () => setRows(rows.map((x, j) => j === i ? { ...x, include: !x.include } : x))
       }
-    ), /* @__PURE__ */ React.createElement("div", { className: "s-main" }, /* @__PURE__ */ React.createElement("div", { className: "s-label" }, r.label), r.kind === "income" ? /* @__PURE__ */ React.createElement("div", { className: "s-kind" }, "deposit \u2192 income") : /* @__PURE__ */ React.createElement(
+    ), /* @__PURE__ */ React.createElement("div", { className: "s-main" }, /* @__PURE__ */ React.createElement("div", { className: "s-label" }, r.label), /* @__PURE__ */ React.createElement("div", { className: "s-controls" }, /* @__PURE__ */ React.createElement(
+      "select",
+      {
+        className: "catpick kindpick",
+        value: r.kind,
+        onChange: (e) => setRows(rows.map((x, j) => j === i ? { ...x, kind: e.target.value } : x))
+      },
+      /* @__PURE__ */ React.createElement("option", { value: "spend" }, "spending"),
+      /* @__PURE__ */ React.createElement("option", { value: "income" }, "income"),
+      /* @__PURE__ */ React.createElement("option", { value: "refund" }, "refund")
+    ), r.kind !== "income" && /* @__PURE__ */ React.createElement(
       "select",
       {
         className: "catpick",
@@ -2119,7 +2504,7 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
       },
       /* @__PURE__ */ React.createElement("option", { value: "" }, "\u{1F3F7} pick category"),
       categories.map((c) => /* @__PURE__ */ React.createElement("option", { key: c.id, value: c.id }, c.icon, " ", c.name))
-    )), /* @__PURE__ */ React.createElement("span", { className: "s-amt" + (r.kind === "income" ? " pos-amt" : "") }, r.kind === "income" ? "+" : "", money(r.cents))))), /* @__PURE__ */ React.createElement("div", { className: "f-grid", style: { marginTop: 10 } }, /* @__PURE__ */ React.createElement("input", { type: "date", value: rowsDate, onChange: (e) => setRowsDate(e.target.value) }), /* @__PURE__ */ React.createElement("button", { className: "btn quiet", onClick: () => {
+    ))), /* @__PURE__ */ React.createElement("span", { className: "s-amt" + (r.kind === "income" ? " pos-amt" : r.kind === "refund" ? " ref-amt" : "") }, r.kind === "income" ? "+" : r.kind === "refund" ? "\u2212" : "", money(r.cents))))), /* @__PURE__ */ React.createElement("div", { className: "f-grid", style: { marginTop: 10 } }, /* @__PURE__ */ React.createElement("input", { type: "date", value: rowsDate, onChange: (e) => setRowsDate(e.target.value) }), /* @__PURE__ */ React.createElement("button", { className: "btn quiet", onClick: () => {
       setRows(null);
       setScan({ phase: "idle", progress: 0, msg: "" });
     } }, "Back"), /* @__PURE__ */ React.createElement("button", { className: "save", onClick: importRows, disabled: !includedCount }, "Add ", includedCount, " item", includedCount === 1 ? "" : "s")), /* @__PURE__ */ React.createElement("div", { className: "hint" }, "Uses one date for all items \u2014 you can edit any of them later in Activity.")), !rows && /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "seg" }, /* @__PURE__ */ React.createElement("button", { className: kind === "spend" ? "on" : "", onClick: () => setKind("spend") }, "Spending"), /* @__PURE__ */ React.createElement("button", { className: kind === "income" ? "on" : "", onClick: () => setKind("income") }, "Income")), /* @__PURE__ */ React.createElement("div", { className: "f-grid" }, /* @__PURE__ */ React.createElement(
@@ -2150,7 +2535,7 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
       },
       /* @__PURE__ */ React.createElement("option", { value: "" }, "Pick a category (or leave for later)"),
       categories.map((c) => /* @__PURE__ */ React.createElement("option", { key: c.id, value: c.id }, c.icon, " ", c.name))
-    ), /* @__PURE__ */ React.createElement("button", { className: "save", onClick: save }, "Save")), kind === "income" && /* @__PURE__ */ React.createElement("div", { className: "hint" }, 'Deposits feed your "safe to plan" number \u2014 log every one.'))));
+    ), /* @__PURE__ */ React.createElement("button", { className: "save", onClick: save }, "Save")), saveErr && /* @__PURE__ */ React.createElement("div", { className: "verdict red", style: { marginTop: 8 } }, /* @__PURE__ */ React.createElement("span", { className: "v-ic" }, "\u2715"), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("b", null, "Not saved"), /* @__PURE__ */ React.createElement("span", { className: "v-sub" }, saveErr))), kind === "income" && /* @__PURE__ */ React.createElement("div", { className: "hint" }, 'Deposits feed your "safe to plan" number \u2014 log every one.'))));
   }
   function Funds({ sinkingFunds, catById, adjustFund }) {
     const [amounts, setAmounts] = useState({});
@@ -2178,8 +2563,27 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
     }), /* @__PURE__ */ React.createElement("div", { className: "footnote" }, "Moving money here isn't spending \u2014 it never touches your monthly budget."));
   }
   function Settings(p) {
-    const { settings, baseline, setSetting, exportJSON, importJSON, resetSeed, rev } = p;
+    const {
+      settings,
+      baseline,
+      setSetting,
+      exportJSON,
+      importJSON,
+      resetSeed,
+      rev,
+      syncCfg,
+      setSyncCfg,
+      syncInfo,
+      runSync
+    } = p;
     const [check, setCheck] = useState(null);
+    const [sc, setSc] = useState(() => syncCfg || { repo: "", token: "", pass: "", enabled: false });
+    const applySync = (enabled) => {
+      const cfg = { ...sc, repo: sc.repo.trim(), enabled };
+      setSc(cfg);
+      setSyncCfg(cfg);
+      if (enabled) setTimeout(runSync, 50);
+    };
     const methods = [
       ["DEFAULT", "Cautious (recommended)", "Plans around the lower of your recent average and your slowest month. Best for uneven income."],
       ["AVERAGE_3M", "Recent average", "The average of your last three months of deposits."],
@@ -2193,7 +2597,12 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
     const runCheck = () => {
       const a = window.runBudgetTests(C, window.BudgetTestSeed || SEED);
       const b = window.runReceiptTests ? window.runReceiptTests(window.BudgetReceipt, (window.BudgetTestSeed || SEED).categories) : { pass: 0, fail: 0, log: [] };
-      setCheck({ pass: a.pass + b.pass, fail: a.fail + b.fail, log: a.log.concat(b.log) });
+      const s = window.runSyncTests && window.BudgetSync ? window.runSyncTests(window.BudgetSync) : { pass: 0, fail: 0, log: [] };
+      setCheck({
+        pass: a.pass + b.pass + s.pass,
+        fail: a.fail + b.fail + s.fail,
+        log: a.log.concat(b.log, s.log)
+      });
     };
     return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h2", { className: "screen-title" }, "Settings"), /* @__PURE__ */ React.createElement("p", { className: "screen-sub" }, "How your plan is calculated, and your data."), /* @__PURE__ */ React.createElement("section", { className: "card" }, /* @__PURE__ */ React.createElement("h3", null, "How much to plan around"), /* @__PURE__ */ React.createElement("div", { className: "sub", style: { marginBottom: 4 } }, "Right now: ", /* @__PURE__ */ React.createElement("b", null, fmt0(baseline.value), "/mo"), ". With uneven income, planning around a careful number beats planning around a good month."), methods.map(([id, title, sub]) => /* @__PURE__ */ React.createElement("label", { key: id, className: "opt" }, /* @__PURE__ */ React.createElement(
       "input",
@@ -2233,7 +2642,44 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
           if (isFinite(n) && n > 0) setSetting("targetRunway", n);
         }
       }
-    ))), /* @__PURE__ */ React.createElement("section", { className: "card" }, /* @__PURE__ */ React.createElement("h3", null, "Your data"), /* @__PURE__ */ React.createElement("div", { className: "sub" }, "Everything lives on this device. Nothing is sent anywhere unless you export it."), /* @__PURE__ */ React.createElement("div", { className: "btn-row" }, /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: exportJSON }, "Export backup"), /* @__PURE__ */ React.createElement("label", { className: "btn quiet filelabel" }, "Import backup", /* @__PURE__ */ React.createElement(
+    ))), /* @__PURE__ */ React.createElement("section", { className: "card" }, /* @__PURE__ */ React.createElement("h3", null, "Sync across devices"), /* @__PURE__ */ React.createElement("div", { className: "sub", style: { marginBottom: 8 } }, "Optional. Keeps phone and desktop identical by saving an ", /* @__PURE__ */ React.createElement("b", null, "encrypted"), " copy to a private GitHub repo you own. Your passphrase scrambles the data on this device first \u2014 GitHub only ever stores unreadable ciphertext."), /* @__PURE__ */ React.createElement("div", { className: "f-grid", style: { display: "grid", gridTemplateColumns: "1fr", gap: 9 } }, /* @__PURE__ */ React.createElement(
+      "input",
+      {
+        placeholder: "Private repo (yourname/budget-data)",
+        autoCapitalize: "none",
+        autoCorrect: "off",
+        value: sc.repo,
+        onChange: (e) => setSc({ ...sc, repo: e.target.value }),
+        style: { border: "1px solid var(--ring)", borderRadius: 10, padding: 12, background: "var(--page)" }
+      }
+    ), /* @__PURE__ */ React.createElement(
+      "input",
+      {
+        type: "password",
+        placeholder: "GitHub token (Contents read/write)",
+        autoCapitalize: "none",
+        value: sc.token,
+        onChange: (e) => setSc({ ...sc, token: e.target.value }),
+        style: { border: "1px solid var(--ring)", borderRadius: 10, padding: 12, background: "var(--page)" }
+      }
+    ), /* @__PURE__ */ React.createElement(
+      "input",
+      {
+        type: "password",
+        placeholder: "Encryption passphrase (same on every device)",
+        value: sc.pass,
+        onChange: (e) => setSc({ ...sc, pass: e.target.value }),
+        style: { border: "1px solid var(--ring)", borderRadius: 10, padding: 12, background: "var(--page)" }
+      }
+    )), /* @__PURE__ */ React.createElement("div", { className: "btn-row" }, !(syncCfg && syncCfg.enabled) ? /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        className: "btn primary",
+        disabled: !sc.repo || !sc.token || !sc.pass,
+        onClick: () => applySync(true)
+      },
+      "Turn on sync"
+    ) : /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: runSync, disabled: syncInfo.running }, syncInfo.running ? "Syncing\u2026" : "Sync now"), " ", /* @__PURE__ */ React.createElement("button", { className: "btn quiet", onClick: () => applySync(false) }, "Turn off"))), syncInfo.msg && /* @__PURE__ */ React.createElement("div", { className: "sub", style: { marginTop: 8, color: syncInfo.err ? "var(--crit)" : "var(--good-text)" } }, syncInfo.err ? "\u26A0 " : "\u2713 ", syncInfo.msg), /* @__PURE__ */ React.createElement("div", { className: "sub", style: { marginTop: 6 } }, "If you forget the passphrase, the synced copy is unrecoverable (that's the point) \u2014 your on-device data stays fine, just set sync up again with a new passphrase.")), /* @__PURE__ */ React.createElement("section", { className: "card" }, /* @__PURE__ */ React.createElement("h3", null, "Your data"), /* @__PURE__ */ React.createElement("div", { className: "sub" }, "Everything lives on this device", syncCfg && syncCfg.enabled ? " (plus the encrypted sync copy)" : "", ". Nothing readable leaves it unless you export."), /* @__PURE__ */ React.createElement("div", { className: "btn-row" }, /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: exportJSON }, "Export backup"), /* @__PURE__ */ React.createElement("label", { className: "btn quiet filelabel" }, "Import backup", /* @__PURE__ */ React.createElement(
       "input",
       {
         type: "file",
