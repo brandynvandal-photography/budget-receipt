@@ -201,6 +201,23 @@ h2.screen-title{font-size:22px;font-weight:700;margin:14px 0 2px}
 .footnote{text-align:center;font-size:11.5px;color:var(--muted);padding:14px 0 4px}
 .err{white-space:pre-wrap;color:var(--crit);font-size:13px}
 
+/* scan (camera OCR) */
+.scanbtn{display:block;text-align:center;border:1.5px dashed var(--accent);color:var(--accent);
+  border-radius:11px;padding:13px;font-size:15px;font-weight:600;cursor:pointer;margin-bottom:10px;
+  background:var(--page)}
+.scanbtn.busy{color:var(--ink2);border-color:var(--ring);font-weight:500}
+.scanlist{max-height:44vh;overflow:auto;border:1px solid var(--grid);border-radius:11px;padding:2px 10px}
+.scanrow{display:flex;align-items:center;gap:10px;padding:10px 0;border-top:1px solid var(--grid)}
+.scanrow:first-of-type{border-top:none}
+.scanrow input[type=checkbox]{width:19px;height:19px;flex:0 0 auto}
+.scanrow .s-main{flex:1;min-width:0}
+.scanrow .s-label{font-size:14px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.scanrow .s-kind{font-size:12px;color:var(--good-text)}
+.scanrow .s-amt{font-size:14px;font-weight:700;font-variant-numeric:tabular-nums}
+.scanrow .pos-amt{color:var(--good-text)}
+.sheet{max-height:88vh;overflow:auto}
+.save:disabled{opacity:.5}
+
 </style>
 </head>
 <body>
@@ -964,6 +981,335 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
 })(typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : this));
 
 </script>
+<script>/* receipt & screenshot parser */
+/* =====================================================================
+   RECEIPT / SCREENSHOT PARSER — pure functions, no DOM, no OCR here.
+   Input: raw OCR text. Output: structured suggestion(s) for the user to
+   CONFIRM (never auto-committed — correct beats clever in a money app).
+   Handles two shapes:
+     1. A paper receipt  -> one txn  { merchant, totalCents, dateISO }
+     2. A bank-app screenshot (e.g. Chime category breakdown or txn list)
+        -> many rows     [ { label, cents, kind } ]
+   ===================================================================== */
+(function (root) {
+  "use strict";
+
+  /* ---------- money tokens ----------
+     $12.34 / 12.34 / 1,234.56 / -$12.34 / +$50.00 — require 2 decimals so
+     phone numbers, card digits, and qty don't match. */
+  var MONEY = /([+\-–]?)\s*\$?\s*(\d{1,3}(?:,\d{3})*|\d{1,6})\.(\d{2})(?!\d)/g;
+
+  function moneyMatches(line) {
+    var out = [], m;
+    MONEY.lastIndex = 0;
+    while ((m = MONEY.exec(line)) !== null) {
+      var cents = parseInt(m[2].replace(/,/g, ""), 10) * 100 + parseInt(m[3], 10);
+      var neg = m[1] === "-" || m[1] === "–";
+      var pos = m[1] === "+";
+      out.push({ cents: cents, neg: neg, pos: pos });
+    }
+    return out;
+  }
+
+  function cleanLines(text) {
+    return String(text || "").split(/\r?\n/)
+      .map(function (l) { return l.replace(/\s+/g, " ").trim(); })
+      .filter(function (l) { return l.length > 0; });
+  }
+
+  /* ---------- date extraction ---------- */
+  function pad(n) { return (n < 10 ? "0" : "") + n; }
+  function validDate(y, mo, d) {
+    return y >= 2000 && y <= 2100 && mo >= 1 && mo <= 12 && d >= 1 && d <= 31;
+  }
+  var MONTHS = { jan:1, feb:2, mar:3, apr:4, may:5, jun:6, jul:7, aug:8, sep:9, oct:10, nov:11, dec:12 };
+  // returns ISODate or null. todayISO caps the future (OCR misreads).
+  function findDate(text, todayISO) {
+    var m;
+    // 2026-07-10 / 2026/07/10
+    m = text.match(/\b(20\d{2})[-\/](\d{1,2})[-\/](\d{1,2})\b/);
+    if (m && validDate(+m[1], +m[2], +m[3])) return cap(m[1] + "-" + pad(+m[2]) + "-" + pad(+m[3]));
+    // 07/10/2026 or 07/10/26 or 7-10-26
+    m = text.match(/\b(\d{1,2})[\/\-](\d{1,2})[\/\-](20\d{2}|\d{2})\b/);
+    if (m) {
+      var y = m[3].length === 2 ? 2000 + (+m[3]) : +m[3];
+      if (validDate(y, +m[1], +m[2])) return cap(y + "-" + pad(+m[1]) + "-" + pad(+m[2]));
+    }
+    // Jul 10, 2026 / July 10 / 10 Jul — scan ALL candidates; the first
+    // letters+digits pair is often not a date ("PUMP 04").
+    var re1 = /\b([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:,?\s*(20\d{2}))?\b/g;
+    while ((m = re1.exec(text)) !== null) {
+      var mo = MONTHS[m[1].slice(0, 3).toLowerCase()];
+      var yr = m[3] ? +m[3] : +todayISO.slice(0, 4);
+      if (mo && validDate(yr, mo, +m[2])) {
+        var iso1 = cap(yr + "-" + pad(mo) + "-" + pad(+m[2]));
+        if (iso1) return iso1;
+      }
+    }
+    var re2 = /\b(\d{1,2})\s+([A-Za-z]{3,9})\.?\s*(20\d{2})?\b/g;
+    while ((m = re2.exec(text)) !== null) {
+      var mo2 = MONTHS[m[2].slice(0, 3).toLowerCase()];
+      var yr2 = m[3] ? +m[3] : +todayISO.slice(0, 4);
+      if (mo2 && validDate(yr2, mo2, +m[1])) {
+        var iso2 = cap(yr2 + "-" + pad(mo2) + "-" + pad(+m[1]));
+        if (iso2) return iso2;
+      }
+    }
+    return null;
+    function cap(iso) { return iso > todayISO ? null : iso; }
+  }
+
+  /* ---------- merchant guess (top of a paper receipt) ---------- */
+  function guessMerchant(lines) {
+    for (var i = 0; i < Math.min(6, lines.length); i++) {
+      var l = lines[i];
+      var alpha = (l.match(/[A-Za-z]/g) || []).length;
+      var digits = (l.match(/\d/g) || []).length;
+      if (alpha >= 3 && alpha > digits * 2 && !/receipt|welcome|thank|survey|www\.|http/i.test(l)) {
+        // title-case a SHOUTING header
+        var name = l.replace(/[#*|_]+/g, "").trim();
+        if (name === name.toUpperCase()) {
+          name = name.toLowerCase().replace(/\b[a-z]/g, function (c) { return c.toUpperCase(); });
+        }
+        return name.slice(0, 40);
+      }
+    }
+    return "";
+  }
+
+  /* ---------- single-receipt total ---------- */
+  var TOTAL_LABEL = /\b(grand\s*total|amount\s*due|balance\s*due|total)\b/i;
+  var NOT_TOTAL = /\bsub\s*-?\s*total|total\s*(savings|saved|discount|items?|qty|tax)|tender|change|cash\s*back\b/i;
+
+  function findTotal(lines) {
+    var labeled = [];
+    for (var i = 0; i < lines.length; i++) {
+      var l = lines[i];
+      if (TOTAL_LABEL.test(l) && !NOT_TOTAL.test(l)) {
+        var ms = moneyMatches(l);
+        if (!ms.length && i + 1 < lines.length) ms = moneyMatches(lines[i + 1]); // total on next line
+        if (ms.length) labeled.push(ms[ms.length - 1].cents);
+      }
+    }
+    if (labeled.length) return { cents: Math.max.apply(null, labeled), labeled: true };
+    // fallback: the largest money token anywhere (receipts rarely show a value above the total)
+    var all = [];
+    lines.forEach(function (l) { moneyMatches(l).forEach(function (t) { all.push(t.cents); }); });
+    if (all.length) return { cents: Math.max.apply(null, all), labeled: false };
+    return null;
+  }
+
+  /* ---------- list mode (bank screenshots: label + amount rows) ---------- */
+  var ROW_EXCLUDE = /\b(available|balance|pending\s*balance|credit\s*limit|limit|rewards?|cash\s*back|round\s*-?\s*ups?|save\s*when|spending\s*account|checking|savings|total)\b/i;
+
+  function parseListRows(lines) {
+    var rows = [];
+    for (var i = 0; i < lines.length; i++) {
+      var l = lines[i];
+      var ms = moneyMatches(l);
+      if (ms.length !== 1) continue;                    // one amount per row
+      var label = l.replace(MONEY, " ").replace(/\s+/g, " ").replace(/[·•|>._-]+$/g, "").trim();
+      MONEY.lastIndex = 0;
+      if (label.length < 2) {
+        // amount-only line: label probably on the previous line
+        var prev = lines[i - 1];
+        if (prev && !moneyMatches(prev).length && /[A-Za-z]{3}/.test(prev) && !ROW_EXCLUDE.test(prev)) {
+          label = prev.replace(/[·•|>._-]+$/g, "").trim();
+        }
+      }
+      if (label.length < 2) continue;
+      if (ROW_EXCLUDE.test(label)) continue;
+      if (!/[A-Za-z]{2}/.test(label)) continue;
+      var t = ms[0];
+      rows.push({
+        label: label.slice(0, 40),
+        cents: t.cents,
+        kind: t.pos ? "income" : "spend",             // "+$500" reads as a deposit
+      });
+    }
+    return rows;
+  }
+
+  /* ---------- category guessing ---------- */
+  // keyword -> preferred category id (matches the app's seed ids; falls back by name)
+  var KEYWORDS = [
+    [/fred\s*meyer|safeway|kroger|albertsons?|winco|costco|walmart|trader\s*joe|whole\s*foods|aldi|grocer|market|qfc|food\s*4\s*less|groceries/i, "gro", "Groceries"],
+    [/shell|chevron|arco|exxon|mobil|texaco|76|circle\s*k|gas|fuel|les\s*schwab|jiffy\s*lube|autozone|o'?reilly|napa|firestone|discount\s*tire|car\s*wash|parking|toll|transport|uber|lyft/i, "trans", "Transportation"],
+    [/restaurant|mcdonald|burger|taco|pizza|starbucks|dutch\s*bros|cafe|coffee|chipotle|subway|kfc|wendy|deli|brew|bar\s|grill|thai|pho|sushi|food\s*&?\s*drink|dining|doordash|grubhub|fast\s*food/i, "dine", "Food & drinks"],
+    [/electric|energy|power|water|sewer|utility|utilities|internet|comcast|xfinity|spectrum|verizon|t-?mobile|at&?t|phone\s*bill/i, "util", "Utilities"],
+    [/insurance|geico|progressive|state\s*farm|allstate|farmers/i, "ins", "Insurance"],
+    [/rent|landlord|property\s*mgmt|apartments?/i, "rent", "Rent"],
+    [/hotel|motel|airbnb|airline|alaska\s*air|delta|united|southwest|flight|camp|travel|vacation/i, "vac", "Vacation"],
+  ];
+
+  function normMerchant(s) {
+    return String(s || "").toLowerCase().replace(/[^a-z0-9 ]/g, "").replace(/\s+/g, " ").trim().slice(0, 40);
+  }
+
+  // merchantMap (learned) wins over keywords. categories used to verify the id exists.
+  function guessCategory(label, categories, merchantMap) {
+    var key = normMerchant(label);
+    if (!key) return null;
+    var byId = {}; var byName = {};
+    (categories || []).forEach(function (c) { byId[c.id] = c; byName[c.name.toLowerCase()] = c; });
+    if (merchantMap) {
+      // exact, then prefix/contains for OCR jitter
+      if (merchantMap[key] && byId[merchantMap[key]]) return merchantMap[key];
+      var keys = Object.keys(merchantMap);
+      for (var i = 0; i < keys.length; i++) {
+        var k = keys[i];
+        if (k.length >= 4 && (key.indexOf(k) !== -1 || k.indexOf(key) !== -1) && byId[merchantMap[k]]) {
+          return merchantMap[k];
+        }
+      }
+    }
+    for (var j = 0; j < KEYWORDS.length; j++) {
+      var row = KEYWORDS[j];
+      if (row[0].test(label)) {
+        if (byId[row[1]]) return row[1];
+        var byN = byName[row[2].toLowerCase()];
+        if (byN) return byN.id;
+      }
+    }
+    return null;
+  }
+
+  /* ---------- entry point ---------- */
+  // returns { mode: "receipt"|"list"|"empty", receipt?, rows? }
+  function parseCapture(text, todayISO) {
+    var lines = cleanLines(text);
+    if (!lines.length) return { mode: "empty" };
+    var rows = parseListRows(lines);
+    var total = findTotal(lines);
+    var hasTotalLabel = lines.some(function (l) { return TOTAL_LABEL.test(l) && !NOT_TOTAL.test(l); });
+    // A paper receipt has a labeled total; a bank screenshot is many rows without one.
+    if (rows.length >= 3 && !hasTotalLabel) {
+      return { mode: "list", rows: rows };
+    }
+    if (total) {
+      return {
+        mode: "receipt",
+        receipt: {
+          merchant: guessMerchant(lines),
+          totalCents: total.cents,
+          labeled: total.labeled,
+          dateISO: findDate(lines.join(" \n"), todayISO) || todayISO,
+        },
+      };
+    }
+    if (rows.length) return { mode: "list", rows: rows };
+    return { mode: "empty" };
+  }
+
+  var api = {
+    parseCapture: parseCapture, parseListRows: parseListRows, findTotal: findTotal,
+    findDate: findDate, guessMerchant: guessMerchant, guessCategory: guessCategory,
+    normMerchant: normMerchant, cleanLines: cleanLines,
+  };
+  if (typeof module !== "undefined" && module.exports) module.exports = api;
+  else root.BudgetReceipt = api;
+})(typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : this));
+
+</script>
+<script>/* receipt parser tests */
+/* Fixture tests for the receipt/screenshot parser. Runs in node and is
+   folded into the in-app self-check. */
+(function (root) {
+  "use strict";
+  function runReceiptTests(R, categories) {
+    var pass = 0, fail = 0, log = [];
+    function ok(name, cond, detail) {
+      if (cond) { pass++; log.push(["ok", name]); }
+      else { fail++; log.push(["fail", name + (detail ? "  [" + detail + "]" : "")]); }
+    }
+    function eq(name, got, want) { ok(name, got === want, "got " + JSON.stringify(got) + " want " + JSON.stringify(want)); }
+    var TODAY = "2026-07-10";
+
+    /* --- paper receipt: grocery --- */
+    var grocery = [
+      "FRED MEYER", "3805 SE Hawthorne Blvd", "Portland OR 97214", "(503) 555-0134",
+      "GROCERY", "MILK 2% GAL 3.49", "EGGS LG DZ 4.29", "CHKN BRST 9.87",
+      "SUBTOTAL 17.65", "TAX 0.00", "TOTAL 17.65",
+      "VISA TEND 17.65", "CHANGE 0.00", "07/08/2026 14:22",
+    ].join("\n");
+    var g = R.parseCapture(grocery, TODAY);
+    eq("grocery: mode", g.mode, "receipt");
+    eq("grocery: total 17.65", g.receipt.totalCents, 1765);
+    ok("grocery: total was labeled", g.receipt.labeled === true);
+    eq("grocery: merchant", g.receipt.merchant, "Fred Meyer");
+    eq("grocery: date", g.receipt.dateISO, "2026-07-08");
+    eq("grocery: category", R.guessCategory(g.receipt.merchant, categories, {}), "gro");
+
+    /* --- paper receipt: gas, total on next line, SHOUTY --- */
+    var gas = [
+      "SHELL OIL 57444", "PUMP 04 REGULAR", "GALLONS 11.203", "PRICE/G $4.199",
+      "FUEL TOTAL", "$47.04", "Jul 2, 2026",
+    ].join("\n");
+    var s = R.parseCapture(gas, TODAY);
+    eq("gas: mode", s.mode, "receipt");
+    eq("gas: total next-line 47.04", s.receipt.totalCents, 4704);
+    eq("gas: date月", s.receipt.dateISO, "2026-07-02");
+    eq("gas: category", R.guessCategory("SHELL OIL 57444", categories, {}), "trans");
+
+    /* --- restaurant: subtotal/tip must not win --- */
+    var rest = [
+      "PINE STATE BISCUITS", "Server: Ash", "2x Reggie 15.00", "Coffee 3.50",
+      "Subtotal 18.50", "Tax 0.00", "Tip ____", "Total 18.50", "06/28/26",
+    ].join("\n");
+    var r = R.parseCapture(rest, TODAY);
+    eq("restaurant: total not subtotal", r.receipt.totalCents, 1850);
+    eq("restaurant: date 2-digit year", r.receipt.dateISO, "2026-06-28");
+    eq("restaurant: category", R.guessCategory("Pine State Biscuits restaurant", categories, {}), "dine");
+
+    /* --- learned merchant map beats keywords --- */
+    var learned = { "pine state biscuits": "vac" };
+    eq("merchantMap wins", R.guessCategory("PINE STATE BISCUITS", categories, learned), "vac");
+    eq("merchantMap fuzzy (OCR jitter)", R.guessCategory("PINE STATE BISCUIT", categories, learned), "vac");
+
+    /* --- Chime category-breakdown screenshot --- */
+    var chime = [
+      "9:41", "Chime", "Spending", "July",
+      "Food & Drink $432.10", "Transportation $210.55", "Groceries $388.00",
+      "Bills & Utilities $250.00", "Shopping $86.44",
+      "Available balance $1,204.33",
+    ].join("\n");
+    var c = R.parseCapture(chime, TODAY);
+    eq("chime: mode is list", c.mode, "list");
+    eq("chime: 5 rows (balance excluded)", c.rows.length, 5);
+    ok("chime: no balance row", c.rows.every(function (x) { return !/balance/i.test(x.label); }));
+    eq("chime: food row cents", c.rows[0].cents, 43210);
+    eq("chime: food row category", R.guessCategory(c.rows[0].label, categories, {}), "dine");
+    eq("chime: transport category", R.guessCategory(c.rows[1].label, categories, {}), "trans");
+
+    /* --- Chime transaction-list screenshot with signs --- */
+    var chimeTx = [
+      "Transactions", "Fred Meyer", "-$38.42", "Shell", "-$52.10",
+      "Direct Deposit ACME LLC", "+$1,250.00", "Dutch Bros", "-$7.25",
+    ].join("\n");
+    var ct = R.parseCapture(chimeTx, TODAY);
+    eq("chimeTx: mode", ct.mode, "list");
+    eq("chimeTx: 4 rows", ct.rows.length, 4);
+    var dep = ct.rows.filter(function (x) { return x.kind === "income"; });
+    eq("chimeTx: deposit detected as income", dep.length, 1);
+    eq("chimeTx: deposit cents", dep[0].cents, 125000);
+    eq("chimeTx: merchant label carried from prev line", ct.rows[0].label, "Fred Meyer");
+
+    /* --- garbage in, empty out (no NaN, no crash) --- */
+    eq("empty text", R.parseCapture("", TODAY).mode, "empty");
+    eq("no-money text", R.parseCapture("hello world\nno numbers here", TODAY).mode, "empty");
+    ok("phone number not money", R.parseCapture("CALL 503-555-0134 TODAY", TODAY).mode === "empty");
+
+    /* --- future OCR-misread date falls back to today --- */
+    var fut = R.parseCapture("STORE\nTOTAL 10.00\n12/25/2099", TODAY);
+    eq("future date capped to today", fut.receipt.dateISO, TODAY);
+
+    return { pass: pass, fail: fail, log: log };
+  }
+  if (typeof module !== "undefined" && module.exports) module.exports = { runReceiptTests: runReceiptTests };
+  else root.runReceiptTests = runReceiptTests;
+})(typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : this));
+
+</script>
 <script>/* in-browser test harness */
 /* In-browser mirror of tests.js (§7). Uses the SAME BudgetCore that the
    app renders with, so a green panel means the shipped app is doing the
@@ -1079,11 +1425,15 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
   const C = window.BudgetCore;
   const SEED = window.BudgetSeed;
   const STORE = window.BudgetStorage;
-  const SCHEMA_VERSION = 2;
+  const SCHEMA_VERSION = 3;
   const MIGRATIONS = [
     function v1_to_v2(data) {
       if (!data.sinkingFunds) data.sinkingFunds = JSON.parse(JSON.stringify(SEED.sinkingFunds));
       data.schemaVersion = 2;
+    },
+    function v2_to_v3(data) {
+      if (!data.merchantMap) data.merchantMap = {};
+      data.schemaVersion = 3;
     }
   ];
   function applyMigrations(data) {
@@ -1107,6 +1457,7 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
       settings: JSON.parse(JSON.stringify(s.settings)),
       sinkingFunds: JSON.parse(JSON.stringify(s.sinkingFunds)),
       overrides: {},
+      merchantMap: {},
       schemaVersion: s.schemaVersion
     });
   }
@@ -1178,6 +1529,7 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
   }
   function Main({ data, setData, tab, setTab, rev, setRev }) {
     const { categories, txns, income, settings, overrides, sinkingFunds } = data;
+    const merchantMap = data.merchantMap || {};
     const [sheetOpen, setSheetOpen] = useState(false);
     const dataMonths = useMemo(() => C.monthsWithData(income, txns), [income, txns]);
     const allMonths = useMemo(() => {
@@ -1237,16 +1589,47 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
         return { ...d, overrides: o };
       });
     };
+    const learn = (map, label, catId) => {
+      const key = window.BudgetReceipt ? window.BudgetReceipt.normMerchant(label) : "";
+      if (key && catId && Object.keys(map).length < 500) map[key] = catId;
+      return map;
+    };
     const addTxn = (t) => {
       const cents = C.parseDollars(t.amount);
       if (cents == null || !t.date) return false;
-      setData((d) => ({ ...d, txns: [...d.txns, {
-        id: "t" + Date.now() + Math.floor(Math.random() * 1e4),
-        date: t.date,
-        amount: cents,
-        categoryId: t.categoryId || null,
-        merchant: t.merchant || ""
-      }] }));
+      setData((d) => ({
+        ...d,
+        merchantMap: learn({ ...d.merchantMap || {} }, t.merchant, t.categoryId),
+        txns: [...d.txns, {
+          id: "t" + Date.now() + Math.floor(Math.random() * 1e4),
+          date: t.date,
+          amount: cents,
+          categoryId: t.categoryId || null,
+          merchant: t.merchant || ""
+        }]
+      }));
+      return true;
+    };
+    const addBatch = (rows, dateISO) => {
+      setData((d) => {
+        const txns2 = [...d.txns], income2 = [...d.income];
+        const map = { ...d.merchantMap || {} };
+        rows.forEach((r, i) => {
+          if (r.kind === "income") {
+            income2.push({ id: "i" + Date.now() + i, date: dateISO, amount: r.cents, source: r.label });
+          } else {
+            txns2.push({
+              id: "t" + Date.now() + i,
+              date: dateISO,
+              amount: r.cents,
+              categoryId: r.categoryId || null,
+              merchant: r.label
+            });
+            learn(map, r.label, r.categoryId);
+          }
+        });
+        return { ...d, txns: txns2, income: income2, merchantMap: map };
+      });
       return true;
     };
     const addIncome = (t) => {
@@ -1260,10 +1643,14 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
       }] }));
       return true;
     };
-    const recategorize = (txnId, catId) => setData((d) => ({
-      ...d,
-      txns: d.txns.map((t) => t.id === txnId ? { ...t, categoryId: catId || null } : t)
-    }));
+    const recategorize = (txnId, catId) => setData((d) => {
+      const txn = d.txns.find((t) => t.id === txnId);
+      return {
+        ...d,
+        merchantMap: txn ? learn({ ...d.merchantMap || {} }, txn.merchant, catId) : d.merchantMap,
+        txns: d.txns.map((t) => t.id === txnId ? { ...t, categoryId: catId || null } : t)
+      };
+    });
     const setSetting = (key, val) => setData((d) => ({ ...d, settings: { ...d.settings, [key]: val } }));
     const adjustFund = (fundId, str, sign) => {
       const cents = C.parseDollars(str);
@@ -1331,7 +1718,7 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
       ["funds", "Funds", "\u25CD"],
       ["settings", "Settings", "\u2699"]
     ];
-    return /* @__PURE__ */ React.createElement("div", { className: "shell" }, /* @__PURE__ */ React.createElement("header", { className: "top" }, /* @__PURE__ */ React.createElement("div", { className: "logo" }, "BUDGET ", /* @__PURE__ */ React.createElement("span", { className: "scissor" }, "\u2702"), " RECEIPT"), /* @__PURE__ */ React.createElement("label", { className: "monthchip" }, /* @__PURE__ */ React.createElement("select", { value: month, onChange: (e) => setMonth(e.target.value), "aria-label": "Month" }, allMonths.map((m) => /* @__PURE__ */ React.createElement("option", { key: m, value: m }, monthLabel(m), m === CURRENT_MONTH ? " (now)" : ""))))), tab === "home" && /* @__PURE__ */ React.createElement(Home, { ...shared }), tab === "budget" && /* @__PURE__ */ React.createElement(Budget, { ...shared }), tab === "activity" && /* @__PURE__ */ React.createElement(Activity, { ...shared, openAdd: () => setSheetOpen(true) }), tab === "funds" && /* @__PURE__ */ React.createElement(Funds, { ...shared }), tab === "settings" && /* @__PURE__ */ React.createElement(Settings, { ...shared, ...{ setSetting, exportJSON, importJSON, resetSeed } }), (tab === "home" || tab === "budget" || tab === "activity") && /* @__PURE__ */ React.createElement("button", { className: "addbtn", "aria-label": "Add transaction", onClick: () => setSheetOpen(true) }, "+"), sheetOpen && /* @__PURE__ */ React.createElement(AddSheet, { ...{ month, addTxn, addIncome, categories }, close: () => setSheetOpen(false) }), /* @__PURE__ */ React.createElement("nav", { className: "tabbar" }, /* @__PURE__ */ React.createElement("div", { className: "tabbar-inner" }, TABS.map(([id, label, ic]) => /* @__PURE__ */ React.createElement("button", { key: id, className: "tb" + (tab === id ? " on" : ""), onClick: () => setTab(id) }, /* @__PURE__ */ React.createElement("span", { className: "tb-ic" }, ic), /* @__PURE__ */ React.createElement("span", { className: "tb-label" }, label), id === "activity" && uncat !== 0 ? /* @__PURE__ */ React.createElement("span", { className: "dot" }) : null)))));
+    return /* @__PURE__ */ React.createElement("div", { className: "shell" }, /* @__PURE__ */ React.createElement("header", { className: "top" }, /* @__PURE__ */ React.createElement("div", { className: "logo" }, "BUDGET ", /* @__PURE__ */ React.createElement("span", { className: "scissor" }, "\u2702"), " RECEIPT"), /* @__PURE__ */ React.createElement("label", { className: "monthchip" }, /* @__PURE__ */ React.createElement("select", { value: month, onChange: (e) => setMonth(e.target.value), "aria-label": "Month" }, allMonths.map((m) => /* @__PURE__ */ React.createElement("option", { key: m, value: m }, monthLabel(m), m === CURRENT_MONTH ? " (now)" : ""))))), tab === "home" && /* @__PURE__ */ React.createElement(Home, { ...shared }), tab === "budget" && /* @__PURE__ */ React.createElement(Budget, { ...shared }), tab === "activity" && /* @__PURE__ */ React.createElement(Activity, { ...shared, openAdd: () => setSheetOpen(true) }), tab === "funds" && /* @__PURE__ */ React.createElement(Funds, { ...shared }), tab === "settings" && /* @__PURE__ */ React.createElement(Settings, { ...shared, ...{ setSetting, exportJSON, importJSON, resetSeed } }), (tab === "home" || tab === "budget" || tab === "activity") && /* @__PURE__ */ React.createElement("button", { className: "addbtn", "aria-label": "Add transaction", onClick: () => setSheetOpen(true) }, "+"), sheetOpen && /* @__PURE__ */ React.createElement(AddSheet, { ...{ month, addTxn, addIncome, addBatch, categories, merchantMap }, close: () => setSheetOpen(false) }), /* @__PURE__ */ React.createElement("nav", { className: "tabbar" }, /* @__PURE__ */ React.createElement("div", { className: "tabbar-inner" }, TABS.map(([id, label, ic]) => /* @__PURE__ */ React.createElement("button", { key: id, className: "tb" + (tab === id ? " on" : ""), onClick: () => setTab(id) }, /* @__PURE__ */ React.createElement("span", { className: "tb-ic" }, ic), /* @__PURE__ */ React.createElement("span", { className: "tb-label" }, label), id === "activity" && uncat !== 0 ? /* @__PURE__ */ React.createElement("span", { className: "dot" }) : null)))));
   }
   function Home(p) {
     const {
@@ -1580,15 +1967,162 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
       ));
     })), view === "income" && /* @__PURE__ */ React.createElement("section", { className: "card" }, incomeList.length === 0 && /* @__PURE__ */ React.createElement("div", { className: "empty" }, /* @__PURE__ */ React.createElement("span", { className: "e-ic" }, "\u{1F4B5}"), "No deposits logged", showAll ? "" : " in " + monthLabel(month), ".", /* @__PURE__ */ React.createElement("br", null), "Tap +, switch to Income, and add one \u2014 your whole plan is built on it."), incomeList.map((e) => /* @__PURE__ */ React.createElement("div", { key: e.id, className: "txrow" }, /* @__PURE__ */ React.createElement("div", { className: "tx-main" }, /* @__PURE__ */ React.createElement("div", { className: "tx-merch" }, e.source || "Deposit"), /* @__PURE__ */ React.createElement("div", { className: "tx-date" }, monthShort(C.monthOf(e.date)), " ", +e.date.slice(8, 10))), /* @__PURE__ */ React.createElement("span", { className: "tx-amt refund" }, "+", money(e.amount))))));
   }
-  function AddSheet({ month, addTxn, addIncome, categories, close }) {
+  const TESSERACT_CDN = "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js";
+  function loadTesseract() {
+    if (window.Tesseract) return Promise.resolve(window.Tesseract);
+    if (!loadTesseract._p) {
+      loadTesseract._p = new Promise((resolve, reject) => {
+        const s = document.createElement("script");
+        s.src = TESSERACT_CDN;
+        s.onload = () => resolve(window.Tesseract);
+        s.onerror = () => {
+          loadTesseract._p = null;
+          reject(new Error("cdn"));
+        };
+        document.head.appendChild(s);
+      });
+    }
+    return loadTesseract._p;
+  }
+  function preprocessImage(img) {
+    const MAX = 1600;
+    const scale = Math.min(1, MAX / Math.max(img.width, img.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(img.width * scale);
+    canvas.height = Math.round(img.height * scale);
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    const d = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const px = d.data;
+    for (let i = 0; i < px.length; i += 4) {
+      let g = 0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2];
+      g = Math.max(0, Math.min(255, (g - 128) * 1.25 + 128));
+      px[i] = px[i + 1] = px[i + 2] = g;
+    }
+    ctx.putImageData(d, 0, 0);
+    return canvas;
+  }
+  function AddSheet({ month, addTxn, addIncome, addBatch, categories, merchantMap, close }) {
     const [kind, setKind] = useState("spend");
     const defaultDate = month === CURRENT_MONTH ? TODAY : month + "-15";
     const [form, setForm] = useState({ date: defaultDate, merchant: "", amount: "", categoryId: "" });
+    const [scan, setScan] = useState({ phase: "idle", progress: 0, msg: "" });
+    const [rows, setRows] = useState(null);
+    const [rowsDate, setRowsDate] = useState(defaultDate);
     const save = () => {
       const ok = (kind === "income" ? addIncome : addTxn)(form);
       if (ok) close();
     };
-    return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "sheet-bg", onClick: close }), /* @__PURE__ */ React.createElement("div", { className: "sheet" }, /* @__PURE__ */ React.createElement("h3", null, "Add ", kind === "income" ? "income" : "spending"), /* @__PURE__ */ React.createElement("div", { className: "seg" }, /* @__PURE__ */ React.createElement("button", { className: kind === "spend" ? "on" : "", onClick: () => setKind("spend") }, "Spending"), /* @__PURE__ */ React.createElement("button", { className: kind === "income" ? "on" : "", onClick: () => setKind("income") }, "Income")), /* @__PURE__ */ React.createElement("div", { className: "f-grid" }, /* @__PURE__ */ React.createElement(
+    const handleParsed = (text) => {
+      const R = window.BudgetReceipt;
+      const parsed = R.parseCapture(text, TODAY);
+      if (parsed.mode === "receipt") {
+        const rec = parsed.receipt;
+        const guess = R.guessCategory(rec.merchant || "", categories, merchantMap) || "";
+        setRows(null);
+        setKind("spend");
+        setForm({
+          date: rec.dateISO,
+          merchant: rec.merchant,
+          amount: (rec.totalCents / 100).toFixed(2),
+          categoryId: guess
+        });
+        setScan({
+          phase: "done",
+          progress: 100,
+          msg: rec.labeled ? "Read the receipt \u2014 check the details, then save." : "Best guess at the total \u2014 please double-check it."
+        });
+      } else if (parsed.mode === "list") {
+        setRows(parsed.rows.map((r) => ({
+          ...r,
+          include: true,
+          categoryId: r.kind === "spend" ? R.guessCategory(r.label, categories, merchantMap) || "" : ""
+        })));
+        setScan({ phase: "done", progress: 100, msg: "" });
+      } else {
+        setScan({
+          phase: "error",
+          progress: 0,
+          msg: "Couldn't find any amounts. Try a closer, straighter, well-lit shot."
+        });
+      }
+    };
+    window.__scanText = handleParsed;
+    const handleFile = async (file) => {
+      if (!file) return;
+      try {
+        setScan({ phase: "loading", progress: 0, msg: "Getting the reader (one-time download)\u2026" });
+        const T = await loadTesseract();
+        const url = URL.createObjectURL(file);
+        const img = await new Promise((res, rej) => {
+          const i = new Image();
+          i.onload = () => res(i);
+          i.onerror = rej;
+          i.src = url;
+        });
+        const canvas = preprocessImage(img);
+        URL.revokeObjectURL(url);
+        setScan({ phase: "reading", progress: 0, msg: "Reading the image on your phone\u2026" });
+        const worker = await T.createWorker("eng", 1, {
+          logger: (m) => {
+            if (m.status === "recognizing text") {
+              setScan({
+                phase: "reading",
+                progress: Math.round((m.progress || 0) * 100),
+                msg: "Reading the image on your phone\u2026"
+              });
+            }
+          }
+        });
+        const out = await worker.recognize(canvas);
+        await worker.terminate();
+        handleParsed(out.data.text || "");
+      } catch (e) {
+        setScan({
+          phase: "error",
+          progress: 0,
+          msg: "Scanning needs an internet connection the first time (it downloads the reader). You can still type it in below."
+        });
+      }
+    };
+    const includedCount = rows ? rows.filter((r) => r.include).length : 0;
+    const importRows = () => {
+      const chosen = rows.filter((r) => r.include);
+      if (chosen.length && addBatch(chosen, rowsDate)) close();
+    };
+    const busy = scan.phase === "loading" || scan.phase === "reading";
+    return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "sheet-bg", onClick: close }), /* @__PURE__ */ React.createElement("div", { className: "sheet" }, /* @__PURE__ */ React.createElement("h3", null, rows ? "Found " + rows.length + " items \u2014 check them" : "Add " + (kind === "income" ? "income" : "spending")), !rows && /* @__PURE__ */ React.createElement("label", { className: "scanbtn" + (busy ? " busy" : "") }, /* @__PURE__ */ React.createElement(
+      "input",
+      {
+        type: "file",
+        accept: "image/*",
+        style: { display: "none" },
+        disabled: busy,
+        onChange: (e) => {
+          handleFile(e.target.files[0]);
+          e.target.value = "";
+        }
+      }
+    ), busy ? scan.msg : "\u{1F4F7} Scan a receipt or bank screenshot"), busy && /* @__PURE__ */ React.createElement("div", { className: "meter", style: { margin: "8px 0" } }, /* @__PURE__ */ React.createElement("i", { style: { width: scan.progress + "%" } })), scan.phase === "error" && /* @__PURE__ */ React.createElement("div", { className: "verdict red" }, /* @__PURE__ */ React.createElement("span", { className: "v-ic" }, "\u2715"), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("b", null, "Couldn't read it"), /* @__PURE__ */ React.createElement("span", { className: "v-sub" }, scan.msg))), scan.phase === "done" && scan.msg && /* @__PURE__ */ React.createElement("div", { className: "verdict green" }, /* @__PURE__ */ React.createElement("span", { className: "v-ic" }, "\u2713"), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("b", null, "Scanned"), /* @__PURE__ */ React.createElement("span", { className: "v-sub" }, scan.msg))), rows && /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "scanlist" }, rows.map((r, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: "scanrow" }, /* @__PURE__ */ React.createElement(
+      "input",
+      {
+        type: "checkbox",
+        checked: r.include,
+        onChange: () => setRows(rows.map((x, j) => j === i ? { ...x, include: !x.include } : x))
+      }
+    ), /* @__PURE__ */ React.createElement("div", { className: "s-main" }, /* @__PURE__ */ React.createElement("div", { className: "s-label" }, r.label), r.kind === "income" ? /* @__PURE__ */ React.createElement("div", { className: "s-kind" }, "deposit \u2192 income") : /* @__PURE__ */ React.createElement(
+      "select",
+      {
+        className: "catpick",
+        value: r.categoryId,
+        onChange: (e) => setRows(rows.map((x, j) => j === i ? { ...x, categoryId: e.target.value } : x))
+      },
+      /* @__PURE__ */ React.createElement("option", { value: "" }, "\u{1F3F7} pick category"),
+      categories.map((c) => /* @__PURE__ */ React.createElement("option", { key: c.id, value: c.id }, c.icon, " ", c.name))
+    )), /* @__PURE__ */ React.createElement("span", { className: "s-amt" + (r.kind === "income" ? " pos-amt" : "") }, r.kind === "income" ? "+" : "", money(r.cents))))), /* @__PURE__ */ React.createElement("div", { className: "f-grid", style: { marginTop: 10 } }, /* @__PURE__ */ React.createElement("input", { type: "date", value: rowsDate, onChange: (e) => setRowsDate(e.target.value) }), /* @__PURE__ */ React.createElement("button", { className: "btn quiet", onClick: () => {
+      setRows(null);
+      setScan({ phase: "idle", progress: 0, msg: "" });
+    } }, "Back"), /* @__PURE__ */ React.createElement("button", { className: "save", onClick: importRows, disabled: !includedCount }, "Add ", includedCount, " item", includedCount === 1 ? "" : "s")), /* @__PURE__ */ React.createElement("div", { className: "hint" }, "Uses one date for all items \u2014 you can edit any of them later in Activity.")), !rows && /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "seg" }, /* @__PURE__ */ React.createElement("button", { className: kind === "spend" ? "on" : "", onClick: () => setKind("spend") }, "Spending"), /* @__PURE__ */ React.createElement("button", { className: kind === "income" ? "on" : "", onClick: () => setKind("income") }, "Income")), /* @__PURE__ */ React.createElement("div", { className: "f-grid" }, /* @__PURE__ */ React.createElement(
       "input",
       {
         className: "full",
@@ -1616,7 +2150,7 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
       },
       /* @__PURE__ */ React.createElement("option", { value: "" }, "Pick a category (or leave for later)"),
       categories.map((c) => /* @__PURE__ */ React.createElement("option", { key: c.id, value: c.id }, c.icon, " ", c.name))
-    ), /* @__PURE__ */ React.createElement("button", { className: "save", onClick: save }, "Save")), kind === "income" && /* @__PURE__ */ React.createElement("div", { className: "hint" }, 'Deposits feed your "safe to plan" number \u2014 log every one.')));
+    ), /* @__PURE__ */ React.createElement("button", { className: "save", onClick: save }, "Save")), kind === "income" && /* @__PURE__ */ React.createElement("div", { className: "hint" }, 'Deposits feed your "safe to plan" number \u2014 log every one.'))));
   }
   function Funds({ sinkingFunds, catById, adjustFund }) {
     const [amounts, setAmounts] = useState({});
@@ -1656,7 +2190,11 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
       const cents = C.parseDollars(e.target.value);
       if (cents != null) setSetting(key, cents);
     };
-    const runCheck = () => setCheck(window.runBudgetTests(C, window.BudgetTestSeed || SEED));
+    const runCheck = () => {
+      const a = window.runBudgetTests(C, window.BudgetTestSeed || SEED);
+      const b = window.runReceiptTests ? window.runReceiptTests(window.BudgetReceipt, (window.BudgetTestSeed || SEED).categories) : { pass: 0, fail: 0, log: [] };
+      setCheck({ pass: a.pass + b.pass, fail: a.fail + b.fail, log: a.log.concat(b.log) });
+    };
     return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h2", { className: "screen-title" }, "Settings"), /* @__PURE__ */ React.createElement("p", { className: "screen-sub" }, "How your plan is calculated, and your data."), /* @__PURE__ */ React.createElement("section", { className: "card" }, /* @__PURE__ */ React.createElement("h3", null, "How much to plan around"), /* @__PURE__ */ React.createElement("div", { className: "sub", style: { marginBottom: 4 } }, "Right now: ", /* @__PURE__ */ React.createElement("b", null, fmt0(baseline.value), "/mo"), ". With uneven income, planning around a careful number beats planning around a good month."), methods.map(([id, title, sub]) => /* @__PURE__ */ React.createElement("label", { key: id, className: "opt" }, /* @__PURE__ */ React.createElement(
       "input",
       {
