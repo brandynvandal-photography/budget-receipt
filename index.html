@@ -2279,7 +2279,7 @@ const { useState, useEffect, useMemo, useCallback, useRef, Component } = React;
 const C = window.BudgetCore;
 const SEED = window.BudgetSeed;
 const STORE = window.BudgetStorage;
-const SCHEMA_VERSION = 7;
+const SCHEMA_VERSION = 8;
 const MIGRATIONS = [
   function v1_to_v2(data) {
     if (!data.sinkingFunds) data.sinkingFunds = JSON.parse(JSON.stringify(SEED.sinkingFunds));
@@ -2320,6 +2320,28 @@ const MIGRATIONS = [
         data.deleted.txns = data.deleted.txns.filter((id) => !drop(id));
     }
     data.schemaVersion = 7;
+  },
+  function v7_to_v8(data) {
+    // bank-truth cleanup: once accounts are connected, manually entered
+    // txns/income yield to sync data. Tombstoned so sync can't resurrect.
+    if (data.sfMap && Object.keys(data.sfMap).length) {
+      const manual = (x) => {
+        const id = String(x && x.id || "");
+        return id && !id.startsWith("sf-") && !id.startsWith("rec");
+      };
+      const del = data.deleted = data.deleted || { txns: [], income: [] };
+      data.txns = (data.txns || []).filter((t) => {
+        if (manual(t)) { del.txns.push(t.id); return false; }
+        return true;
+      });
+      data.income = (data.income || []).filter((e) => {
+        if (manual(e)) { del.income.push(e.id); return false; }
+        return true;
+      });
+      del.txns = del.txns.slice(-1e3);
+      del.income = del.income.slice(-1e3);
+    }
+    data.schemaVersion = 8;
   }
 ];
 const SYNC_KEY = "budget:sync:v1";
@@ -2843,7 +2865,7 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     // by construction. Intentional deletes still win: savings honors a
     // timestamped tombstone newer than the plan (revivable, like the deposit);
     // bills honor any tombstone (their materializer never revives).
-    if (bankTruth) return txnsRaw.filter((t) => !(String(t.id).startsWith("rec") && String(t.id).indexOf(CURRENT_MONTH) !== -1));
+    if (bankTruth) return txnsRaw.filter((t) => !(String(t.id).startsWith("recsave-") && String(t.id).indexOf(CURRENT_MONTH) !== -1));
     const deadTx = (data.deleted || {}).txns || [];
     let out = txnsRaw;
     const put = (id, amt, make) => {
@@ -2917,7 +2939,7 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     });
   }, [settings.monthlyIncome, incomeRaw, data.deleted, setData]);
   useEffect(() => {
-    if (!bills.length || bankTruth) return;
+    if (!bills.length) return;
     const deadTx = (data.deleted || {}).txns || [];
     const isDead = (list, id) => list.some((x) => x === id || x.startsWith(id + "@"));
     const missing = bills.filter((b) => {
@@ -3256,6 +3278,8 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
   const anchor = settings.bankAnchor;
   const availableNow = useMemo(() => {
     if (!anchor) return null;
+    // bank-truth: In the bank IS the last synced Chime balance — no local math
+    if (bankTruth) return anchor.cents;
     // rec* (plan entries) and sf-* (bank-imported rows) never adjust the
     // anchor: the first are plans, the second are already IN the balance
     const affects = (x) => !String(x.id || "").startsWith("rec") && !String(x.id || "").startsWith("sf-") && ((x._m || 0) > (anchor._ts || 0) || x.date > anchor.asOf);
@@ -3503,7 +3527,7 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     {
       ...shared,
       simpleMode,
-      ...{ deleteTxn, deleteIncome, updateTxn, updateIncome, monthIncomeC, monthSpendC },
+      ...{ deleteTxn, deleteIncome, updateTxn, updateIncome, monthIncomeC, monthSpendC, addBill },
       view: actView,
       setView: setActView,
       openAdd: () => setSheetOpen(true)
@@ -3730,7 +3754,7 @@ function SimpleHome(p) {
   // spending eats the income (empty + red once overspent)
   const savingsLevel = (settings.savingsGoal || 0) > 0 ? savedTotal / settings.savingsGoal : savedTotal > 0 ? 0.55 : 0;
   const leftLevel = monthIncomeC > 0 ? monthNet / monthIncomeC : 0;
-  return /* @__PURE__ */ React.createElement("div", { className: "bankish" }, /* @__PURE__ */ React.createElement(Swiper, { labels: ["In the bank", "Left over", "On pace"] }, /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "In the bank"), availableNow != null ? /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement("div", { className: "bankish" }, false && /* @__PURE__ */ React.createElement(Swiper, { labels: ["In the bank", "Left over", "On pace"] }, /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "In the bank"), availableNow != null ? /* @__PURE__ */ React.createElement(
     AnimatedMoneySplit,
     {
       cents: availableNow,
@@ -3775,7 +3799,7 @@ function SimpleHome(p) {
       buzz([8, 30, 8]);
       setAmt("");
     }
-  } }, "Stash it instead"))), /* @__PURE__ */ React.createElement("div", { className: "tilerow jar-center" }, /* @__PURE__ */ React.createElement("div", { className: "minitile" }, /* @__PURE__ */ React.createElement("div", { className: "mt-label" }, "Saved up"), /* @__PURE__ */ React.createElement(AnimatedFmt0, { className: "mt-val", cents: savedTotal })), /* @__PURE__ */ React.createElement(Jar, { level: savingsLevel, size: 46, tid: "saved" }), /* @__PURE__ */ React.createElement("div", { className: "minitile" }, /* @__PURE__ */ React.createElement("div", { className: "mt-label" }, "Safety net"), /* @__PURE__ */ React.createElement("div", { className: "mt-val" }, runway === Infinity ? "\u2014" : runway.toFixed(1) + "mo"))), dataMonths.length > 1 ? null : dataMonths.length === 0 ? /* @__PURE__ */ React.createElement("section", { className: "card center" }, /* @__PURE__ */ React.createElement("div", { className: "empty" }, /* @__PURE__ */ React.createElement("span", { className: "e-ic" }, "\u{1F4B5}"), "Tap ", /* @__PURE__ */ React.createElement("b", null, "+"), " and log your first deposit.")) : null);
+  } }, "Stash it instead"))), false && /* @__PURE__ */ React.createElement("div", { className: "tilerow jar-center" }, /* @__PURE__ */ React.createElement("div", { className: "minitile" }, /* @__PURE__ */ React.createElement("div", { className: "mt-label" }, "Saved up"), /* @__PURE__ */ React.createElement(AnimatedFmt0, { className: "mt-val", cents: savedTotal })), /* @__PURE__ */ React.createElement(Jar, { level: savingsLevel, size: 46, tid: "saved" }), /* @__PURE__ */ React.createElement("div", { className: "minitile" }, /* @__PURE__ */ React.createElement("div", { className: "mt-label" }, "Safety net"), /* @__PURE__ */ React.createElement("div", { className: "mt-val" }, runway === Infinity ? "\u2014" : runway.toFixed(1) + "mo"))), dataMonths.length > 1 ? null : false ? /* @__PURE__ */ React.createElement("section", { className: "card center" }, /* @__PURE__ */ React.createElement("div", { className: "empty" }, /* @__PURE__ */ React.createElement("span", { className: "e-ic" }, "\u{1F4B5}"), "Tap ", /* @__PURE__ */ React.createElement("b", null, "+"), " and log your first deposit.")) : null);
 }
 function EnvelopeRow({ r, compact, onTap }) {
   const pct = r.planned > 0 ? r.spent / r.planned : r.spent > 0 ? 1 : 0;
@@ -3921,6 +3945,37 @@ function Trends(p) {
     })).filter((r) => r.cents > 0).sort((a, b) => b.cents - a.cents);
   }, [txns, month, catById]);
   const catMax = Math.max(1, ...catRows.map((r) => r.cents));
+  // one actionable nudge from the spending data: biggest flexible category
+  // first, then the sharpest month-over-month rise, then the biggest overall
+  const tip = useMemo(() => {
+    if (!catRows.length) return null;
+    const wantIds = {};
+    (p.categories || []).forEach((c) => {
+      if (c.class === "WANT") wantIds[c.id] = 1;
+    });
+    const topWant = catRows.find((r) => wantIds[r.id]);
+    if (topWant && topWant.cents >= 2e3) {
+      return topWant.icon + " " + topWant.name + " is your biggest flexible category this month at " + fmt0(topWant.cents) + ". Trimming ~15% frees " + fmt0(Math.round(topWant.cents * 0.15)) + "/mo for the jar.";
+    }
+    const idx = dataMonths.indexOf(month);
+    const prev = idx > 0 ? dataMonths[idx - 1] : null;
+    if (prev) {
+      const prevSums = {};
+      txns.forEach((t) => {
+        if (t.isTransfer || C.monthOf(t.date) !== prev) return;
+        const k = t.categoryId || "_un";
+        prevSums[k] = (prevSums[k] || 0) + t.amount;
+      });
+      let best = null;
+      catRows.forEach((r) => {
+        const rise = r.cents - (prevSums[r.id] || 0);
+        if (rise >= 2500 && (!best || rise > best.rise)) best = { r, rise };
+      });
+      if (best) return best.r.icon + " " + best.r.name + " is up " + fmt0(best.rise) + " vs " + monthLabel(prev) + " — worth a look.";
+    }
+    const top = catRows[0];
+    return "💡 Biggest category: " + top.name + " at " + fmt0(top.cents) + ". Small trims here move the jar fastest.";
+  }, [catRows, txns, dataMonths, month]);
   const savePts = useMemo(() => {
     const days = Object.keys(sfHist || {}).sort();
     return days.map((d) => ({ d, v: sfHist[d] ? sfHist[d].save : null })).filter((x) => x.v != null).slice(-60);
@@ -3934,7 +3989,7 @@ function Trends(p) {
     return { pts, W, H, last: savePts[savePts.length - 1], first: savePts[0] };
   }, [savePts]);
   const monthsHist = dataMonths.slice(-6).slice().reverse();
-  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h2", { className: "screen-title" }, "Trends"), /* @__PURE__ */ React.createElement("p", { className: "screen-sub" }, "History, and where the money goes."), dataMonths.length > 0 && /* @__PURE__ */ React.createElement("section", { className: "card center" }, /* @__PURE__ */ React.createElement("div", { className: "eyebrow" }, "Month by month"), /* @__PURE__ */ React.createElement(NetChart, { ...{ income, txns, dataMonths, month, setMonth } }), /* @__PURE__ */ React.createElement("div", { className: "chart-note" }, "Money in minus money out. Tap a month to view it everywhere.")), /* @__PURE__ */ React.createElement("section", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "eyebrow" }, "Where it went · ", monthLabel(month)), catRows.length === 0 && /* @__PURE__ */ React.createElement("div", { className: "empty", style: { padding: "14px 0 6px" } }, "No spending recorded for ", monthLabel(month), " yet."), catRows.map((r) => /* @__PURE__ */ React.createElement("div", { key: r.id, className: "row" }, /* @__PURE__ */ React.createElement("div", { className: "row-line" }, /* @__PURE__ */ React.createElement("span", { className: "row-name" }, /* @__PURE__ */ React.createElement("span", { className: "ic" }, r.icon), r.name), /* @__PURE__ */ React.createElement("span", { className: "row-amt" }, fmt0(r.cents))), /* @__PURE__ */ React.createElement("div", { className: "meter" }, /* @__PURE__ */ React.createElement("i", { style: { width: Math.min(100, r.cents / catMax * 100) + "%" } }))))), line && /* @__PURE__ */ React.createElement("section", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "eyebrow" }, "Savings over time"), /* @__PURE__ */ React.createElement("svg", { viewBox: "0 0 " + line.W + " " + line.H, width: "100%", "aria-label": "Savings balance history" }, /* @__PURE__ */ React.createElement("polyline", { points: line.pts, fill: "none", stroke: "var(--accent)", strokeWidth: "2.2", strokeLinejoin: "round", strokeLinecap: "round" })), /* @__PURE__ */ React.createElement("div", { className: "chart-note" }, monthShort(C.monthOf(line.first.d)), " ", +line.first.d.slice(8, 10), " ", fmt0(line.first.v), " → today ", fmt0(line.last.v))), monthsHist.length > 0 && /* @__PURE__ */ React.createElement("section", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "eyebrow" }, "By month"), monthsHist.map((m) => {
+  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h2", { className: "screen-title" }, "Trends"), /* @__PURE__ */ React.createElement("p", { className: "screen-sub" }, "History, and where the money goes."), tip && /* @__PURE__ */ React.createElement("section", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "eyebrow" }, "Quick tip"), /* @__PURE__ */ React.createElement("div", { className: "sub", style: { marginTop: 6, fontSize: 14, color: "var(--ink2)" } }, tip)), dataMonths.length > 0 && /* @__PURE__ */ React.createElement("section", { className: "card center" }, /* @__PURE__ */ React.createElement("div", { className: "eyebrow" }, "Month by month"), /* @__PURE__ */ React.createElement(NetChart, { ...{ income, txns, dataMonths, month, setMonth } }), /* @__PURE__ */ React.createElement("div", { className: "chart-note" }, "Money in minus money out. Tap a month to view it everywhere.")), /* @__PURE__ */ React.createElement("section", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "eyebrow" }, "Where it went · ", monthLabel(month)), catRows.length === 0 && /* @__PURE__ */ React.createElement("div", { className: "empty", style: { padding: "14px 0 6px" } }, "No spending recorded for ", monthLabel(month), " yet."), catRows.map((r) => /* @__PURE__ */ React.createElement("div", { key: r.id, className: "row" }, /* @__PURE__ */ React.createElement("div", { className: "row-line" }, /* @__PURE__ */ React.createElement("span", { className: "row-name" }, /* @__PURE__ */ React.createElement("span", { className: "ic" }, r.icon), r.name), /* @__PURE__ */ React.createElement("span", { className: "row-amt" }, fmt0(r.cents))), /* @__PURE__ */ React.createElement("div", { className: "meter" }, /* @__PURE__ */ React.createElement("i", { style: { width: Math.min(100, r.cents / catMax * 100) + "%" } }))))), line && /* @__PURE__ */ React.createElement("section", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "eyebrow" }, "Savings over time"), /* @__PURE__ */ React.createElement("svg", { viewBox: "0 0 " + line.W + " " + line.H, width: "100%", "aria-label": "Savings balance history" }, /* @__PURE__ */ React.createElement("polyline", { points: line.pts, fill: "none", stroke: "var(--accent)", strokeWidth: "2.2", strokeLinejoin: "round", strokeLinecap: "round" })), /* @__PURE__ */ React.createElement("div", { className: "chart-note" }, monthShort(C.monthOf(line.first.d)), " ", +line.first.d.slice(8, 10), " ", fmt0(line.first.v), " → today ", fmt0(line.last.v))), monthsHist.length > 0 && /* @__PURE__ */ React.createElement("section", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "eyebrow" }, "By month"), monthsHist.map((m) => {
     const inC = C.monthIncome(income, m), outC = C.monthSpend(txns, m);
     return /* @__PURE__ */ React.createElement("div", { key: m, className: "row" }, /* @__PURE__ */ React.createElement("div", { className: "row-line" }, /* @__PURE__ */ React.createElement("span", { className: "row-name" }, monthLabel(m)), /* @__PURE__ */ React.createElement("span", { className: "row-amt" + (inC - outC < 0 ? " " : "") }, inC - outC >= 0 ? "+" : "", fmt0(inC - outC))), /* @__PURE__ */ React.createElement("div", { className: "row-meta" }, /* @__PURE__ */ React.createElement("span", null, fmt0(inC), " in · ", fmt0(outC), " out")));
   })));
@@ -4026,10 +4081,7 @@ function Activity(p) {
   const saveList = txns.filter((t) => (showAll || C.monthOf(t.date) === month) && savingIds[t.categoryId]).slice().sort((a, b) => a.date < b.date ? 1 : -1);
   const incomeList = income.filter((e) => showAll || C.monthOf(e.date) === month).slice().sort((a, b) => a.date < b.date ? 1 : -1);
   const uncatFirst = spendList.slice().sort((a, b) => (a.categoryId == null ? -1 : 0) - (b.categoryId == null ? -1 : 0));
-  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h2", { className: "screen-title" }, "Activity"), (() => {
-    const savedM = txns.reduce((s, t) => C.monthOf(t.date) === month && savingIds[t.categoryId] ? s + t.amount : s, 0);
-    return /* @__PURE__ */ React.createElement("p", { className: "screen-sub" }, monthLabel(month), ": ", /* @__PURE__ */ React.createElement("b", null, fmt0(monthIncomeC), " in"), " \xB7 ", /* @__PURE__ */ React.createElement("b", null, fmt0(monthSpendC - savedM), " out"), savedM > 0 ? /* @__PURE__ */ React.createElement("span", null, " \xB7 ", /* @__PURE__ */ React.createElement("b", null, fmt0(savedM), " saved")) : null, ".", !simpleMode && uncat !== 0 ? " " + fmt0(uncat) + " is unlabeled \u2014 give it a category so it counts." : " Tap any entry to edit it, or \xD7 to delete.");
-  })(), /* @__PURE__ */ React.createElement("div", { className: "seg" }, /* @__PURE__ */ React.createElement("button", { className: view === "spend" ? "on" : "", onClick: () => setView("spend") }, "Spending"), /* @__PURE__ */ React.createElement("button", { className: view === "income" ? "on" : "", onClick: () => setView("income") }, "Income"), /* @__PURE__ */ React.createElement("button", { className: view === "save" ? "on" : "", onClick: () => setView("save") }, "Savings"), /* @__PURE__ */ React.createElement("button", { className: showAll ? "on" : "", onClick: () => setShowAll(!showAll) }, showAll ? "All \u2713" : "All")), view === "spend" && (() => {
+  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h2", { className: "screen-title" }, "Activity"), /* @__PURE__ */ React.createElement(Swiper, { labels: ["In the bank", "Saved up", "Safety net"] }, /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "In the bank"), p.availableNow != null ? /* @__PURE__ */ React.createElement(AnimatedMoneySplit, { cents: p.availableNow, className: "bank-val" + (p.availableNow < 0 ? " overspent" : "") }) : /* @__PURE__ */ React.createElement("div", { className: "bank-val", style: { opacity: 0.5 } }, "\u2014"), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, fmt0(monthIncomeC), " in \u00b7 ", fmt0(monthSpendC), " out \u00b7 ", monthLabel(month))), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "Saved up"), /* @__PURE__ */ React.createElement(AnimatedFmt0, { className: "bank-val", cents: p.savedTotal }), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, "Chime Savings + Fidelity")), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "Safety net"), /* @__PURE__ */ React.createElement("div", { className: "bank-val" }, p.runway === Infinity ? "\u2014" : p.runway.toFixed(1) + " mo"), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, "if income stopped"))), /* @__PURE__ */ React.createElement("div", { className: "seg" }, /* @__PURE__ */ React.createElement("button", { className: view === "spend" ? "on" : "", onClick: () => setView("spend") }, "Spending"), /* @__PURE__ */ React.createElement("button", { className: view === "income" ? "on" : "", onClick: () => setView("income") }, "Income"), /* @__PURE__ */ React.createElement("button", { className: view === "save" ? "on" : "", onClick: () => setView("save") }, "Savings"), /* @__PURE__ */ React.createElement("button", { className: showAll ? "on" : "", onClick: () => setShowAll(!showAll) }, showAll ? "All \u2713" : "All")), view === "spend" && (() => {
     const isBill = (t) => String(t.id || "").startsWith("recbill");
     const billRows = uncatFirst.filter(isBill);
     const manualRows = uncatFirst.filter((t) => !isBill(t));
@@ -4063,12 +4115,13 @@ function Activity(p) {
       },
       billRows.length === 0 ? /* @__PURE__ */ React.createElement("div", { className: "empty", style: { padding: "6px 0 2px" } }, "Add bills in Settings \u2014 they're logged here automatically on the 1st.") : billRows.map(spendRow)
     ));
-  })(), view === "save" && /* @__PURE__ */ React.createElement("section", { className: "card" }, saveList.length === 0 && /* @__PURE__ */ React.createElement("div", { className: "empty" }, /* @__PURE__ */ React.createElement("span", { className: "e-ic" }, "\u{1F9EF}"), "Nothing set aside", showAll ? "" : " in " + monthLabel(month), ".", /* @__PURE__ */ React.createElement("br", null), 'Tap +, choose "Set aside", and start the habit \u2014 even $20 counts.'), saveList.map((t) => /* @__PURE__ */ React.createElement(SwipeRow, { key: t.id, onDelete: () => deleteTxn(t.id), className: "txrow" }, /* @__PURE__ */ React.createElement("div", { className: "rowic" }, "\u2605"),/* @__PURE__ */ React.createElement("div", { className: "tx-main", onClick: () => setEditing({ kind: "txn", entry: t }), style: { cursor: "pointer" } }, /* @__PURE__ */ React.createElement("div", { className: "tx-merch" }, t.merchant || "Savings"), /* @__PURE__ */ React.createElement("div", { className: "tx-date" }, monthShort(C.monthOf(t.date)), " ", +t.date.slice(8, 10), t.amount < 0 ? " \xB7 taken back out" : " \xB7 set aside")), /* @__PURE__ */ React.createElement("span", { className: "tx-amt" + (t.amount > 0 ? " refund" : "") }, t.amount > 0 ? "+" : "\u2212", money(Math.abs(t.amount))), /* @__PURE__ */ React.createElement(DeleteX, { onDelete: () => deleteTxn(t.id) })))), view === "income" && /* @__PURE__ */ React.createElement("section", { className: "card" }, (p.settings.monthlyIncome || 0) > 0 && /* @__PURE__ */ React.createElement("div", { className: "planline" }, /* @__PURE__ */ React.createElement("span", { className: "pl-name" }, "Monthly plan income"), /* @__PURE__ */ React.createElement("span", { className: "pl-amt" }, fmt0(p.settings.monthlyIncome), /* @__PURE__ */ React.createElement("small", null, "/mo"))), incomeList.length === 0 && /* @__PURE__ */ React.createElement("div", { className: "empty" }, /* @__PURE__ */ React.createElement("span", { className: "e-ic" }, "\u{1F4B5}"), "No deposits logged", showAll ? "" : " in " + monthLabel(month), ".", /* @__PURE__ */ React.createElement("br", null), "Tap +, switch to Income, and add one \u2014 your whole plan is built on it."), incomeList.map((e) => /* @__PURE__ */ React.createElement(SwipeRow, { key: e.id, onDelete: () => deleteIncome(e.id), className: "txrow" }, /* @__PURE__ */ React.createElement("div", { className: "rowic" }, "\u2193"),/* @__PURE__ */ React.createElement("div", { className: "tx-main", onClick: () => setEditing({ kind: "income", entry: e }), style: { cursor: "pointer" } }, /* @__PURE__ */ React.createElement("div", { className: "tx-merch" }, e.source || "Deposit"), /* @__PURE__ */ React.createElement("div", { className: "tx-date" }, monthShort(C.monthOf(e.date)), " ", +e.date.slice(8, 10), " \xB7 tap to edit")), /* @__PURE__ */ React.createElement("span", { className: "tx-amt refund" }, "+", money(e.amount)), /* @__PURE__ */ React.createElement(DeleteX, { onDelete: () => deleteIncome(e.id) })))), editing && /* @__PURE__ */ React.createElement(
+  })(), view === "save" && /* @__PURE__ */ React.createElement("section", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "planline" }, /* @__PURE__ */ React.createElement("span", { className: "pl-name" }, "In savings now"), /* @__PURE__ */ React.createElement("span", { className: "pl-amt" }, fmt0(p.savedTotal))), saveList.length === 0 && /* @__PURE__ */ React.createElement("div", { className: "empty" }, /* @__PURE__ */ React.createElement("span", { className: "e-ic" }, "\u{1F9EF}"), "Nothing set aside", showAll ? "" : " in " + monthLabel(month), ".", /* @__PURE__ */ React.createElement("br", null), 'Tap +, choose "Set aside", and start the habit \u2014 even $20 counts.'), saveList.map((t) => /* @__PURE__ */ React.createElement(SwipeRow, { key: t.id, onDelete: () => deleteTxn(t.id), className: "txrow" }, /* @__PURE__ */ React.createElement("div", { className: "rowic" }, "\u2605"),/* @__PURE__ */ React.createElement("div", { className: "tx-main", onClick: () => setEditing({ kind: "txn", entry: t }), style: { cursor: "pointer" } }, /* @__PURE__ */ React.createElement("div", { className: "tx-merch" }, t.merchant || "Savings"), /* @__PURE__ */ React.createElement("div", { className: "tx-date" }, monthShort(C.monthOf(t.date)), " ", +t.date.slice(8, 10), t.amount < 0 ? " \xB7 taken back out" : " \xB7 set aside")), /* @__PURE__ */ React.createElement("span", { className: "tx-amt" + (t.amount > 0 ? " refund" : "") }, t.amount > 0 ? "+" : "\u2212", money(Math.abs(t.amount))), /* @__PURE__ */ React.createElement(DeleteX, { onDelete: () => deleteTxn(t.id) })))), view === "income" && /* @__PURE__ */ React.createElement("section", { className: "card" }, (p.settings.monthlyIncome || 0) > 0 && /* @__PURE__ */ React.createElement("div", { className: "planline" }, /* @__PURE__ */ React.createElement("span", { className: "pl-name" }, "Monthly plan income"), /* @__PURE__ */ React.createElement("span", { className: "pl-amt" }, fmt0(p.settings.monthlyIncome), /* @__PURE__ */ React.createElement("small", null, "/mo"))), incomeList.length === 0 && /* @__PURE__ */ React.createElement("div", { className: "empty" }, /* @__PURE__ */ React.createElement("span", { className: "e-ic" }, "\u{1F4B5}"), "No deposits logged", showAll ? "" : " in " + monthLabel(month), ".", /* @__PURE__ */ React.createElement("br", null), "Tap +, switch to Income, and add one \u2014 your whole plan is built on it."), incomeList.map((e) => /* @__PURE__ */ React.createElement(SwipeRow, { key: e.id, onDelete: () => deleteIncome(e.id), className: "txrow" }, /* @__PURE__ */ React.createElement("div", { className: "rowic" }, "\u2193"),/* @__PURE__ */ React.createElement("div", { className: "tx-main", onClick: () => setEditing({ kind: "income", entry: e }), style: { cursor: "pointer" } }, /* @__PURE__ */ React.createElement("div", { className: "tx-merch" }, e.source || "Deposit"), /* @__PURE__ */ React.createElement("div", { className: "tx-date" }, monthShort(C.monthOf(e.date)), " ", +e.date.slice(8, 10), " \xB7 tap to edit")), /* @__PURE__ */ React.createElement("span", { className: "tx-amt refund" }, "+", money(e.amount)), /* @__PURE__ */ React.createElement(DeleteX, { onDelete: () => deleteIncome(e.id) })))), editing && /* @__PURE__ */ React.createElement(
     EditSheet,
     {
       ...editing,
       categories,
       simpleMode,
+      addBill: p.addBill,
       save: (f) => {
         const ok = editing.kind === "income" ? updateIncome(editing.entry.id, f) : updateTxn(editing.entry.id, f);
         if (ok) setEditing(null);
@@ -4078,7 +4131,7 @@ function Activity(p) {
     }
   ));
 }
-function EditSheet({ kind, entry, categories, simpleMode, save, close }) {
+function EditSheet({ kind, entry, categories, simpleMode, save, close, addBill }) {
   const [f, setF] = useState({
     date: entry.date,
     merchant: kind === "income" ? entry.source || "" : entry.merchant || "",
@@ -4114,7 +4167,9 @@ function EditSheet({ kind, entry, categories, simpleMode, save, close }) {
     categories.map((c) => /* @__PURE__ */ React.createElement("option", { key: c.id, value: c.id }, c.icon, " ", c.name))
   ), /* @__PURE__ */ React.createElement("button", { className: "save", onClick: () => {
     if (!save(f)) setErr(true);
-  } }, "Save changes")), err && /* @__PURE__ */ React.createElement("div", { className: "verdict red", style: { marginTop: 8 } }, /* @__PURE__ */ React.createElement("span", { className: "v-ic" }, "\u2715"), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("b", null, "Not saved"), /* @__PURE__ */ React.createElement("span", { className: "v-sub" }, "Check the amount and date."))), /* @__PURE__ */ React.createElement("div", { className: "hint" }, "Moving the date to a different month moves this entry's money with it.")));
+  } }, "Save changes"), kind === "txn" && addBill && /* @__PURE__ */ React.createElement("button", { className: "btn quiet", style: { gridColumn: "1/-1" }, onClick: () => {
+    if (addBill(f.merchant, f.amount)) close();
+  } }, "Make this a monthly bill")), err && /* @__PURE__ */ React.createElement("div", { className: "verdict red", style: { marginTop: 8 } }, /* @__PURE__ */ React.createElement("span", { className: "v-ic" }, "\u2715"), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("b", null, "Not saved"), /* @__PURE__ */ React.createElement("span", { className: "v-sub" }, "Check the amount and date."))), /* @__PURE__ */ React.createElement("div", { className: "hint" }, "Moving the date to a different month moves this entry's money with it.")));
 }
 const TESSERACT_CDN = "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js";
 // SRI hash of the pinned 5.1.1 build — a tampered/substituted CDN response is
@@ -4550,19 +4605,6 @@ function Settings(p) {
       title: "Safety net",
       cap: (settings.bankAnchor ? fmt0(settings.bankAnchor.cents) + " in the bank \xB7 " : "") + settings.targetRunway + "-mo goal"
     },
-    /* @__PURE__ */ React.createElement("div", { className: "field" }, /* @__PURE__ */ React.createElement("label", null, "In the bank right now", /* @__PURE__ */ React.createElement("span", { className: "f-sub" }, "checking \u2014 not counting savings; updates as you log")), /* @__PURE__ */ React.createElement(
-      "input",
-      {
-        key: "lc" + rev,
-        type: "number",
-        inputMode: "decimal",
-        defaultValue: settings.bankAnchor ? (settings.bankAnchor.cents / 100).toFixed(2) : (settings.liquidCushion / 100).toFixed(0),
-        onBlur: (e) => {
-          const cents = C.parseDollars(e.target.value);
-          if (cents != null) setSetting("bankAnchor", { cents, asOf: TODAY, _ts: Date.now() });
-        }
-      }
-    )),
     /* @__PURE__ */ React.createElement("div", { className: "field" }, /* @__PURE__ */ React.createElement("label", null, "Savings starting point", /* @__PURE__ */ React.createElement("span", { className: "f-sub" }, `what's in savings before any "set aside" entries`)), /* @__PURE__ */ React.createElement(
       "input",
       {
