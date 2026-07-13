@@ -512,7 +512,9 @@ body{background:linear-gradient(180deg,#16413a 0px,#10302b 300px,#0a1614 680px) 
 /* savings jars: liquid rises as you save, drains as you spend */
 .jar-liq{transition:transform .7s cubic-bezier(.22,.61,.36,1)}
 .jarrow{display:flex;align-items:center;justify-content:center;gap:9px;margin-top:6px}
-.tilerow.jar-center{grid-template-columns:1fr auto 1fr;align-items:center;gap:10px}
+.tilerow.jar-center{grid-template-columns:1fr auto 1fr;align-items:stretch;gap:10px}
+.tilerow.jar-center > svg{align-self:center}
+.tilerow.jar-center .minitile{display:flex;flex-direction:column;justify-content:center}
 .jarhero{display:flex;align-items:center;justify-content:center;gap:12px}
 
 /* hero bubbles: active card has depth, neighbors recede */
@@ -2392,18 +2394,21 @@ function useCountUp(target) {
   const reduced = prefersReduced();
   const start = (reduced || INTRO_DONE) ? target : 0;
   const [val, setVal] = useState(start);
-  const prev = useRef(start);
+  const shown = useRef(start);
   const raf = useRef(0);
   useEffect(() => {
     INTRO_DONE = true;
   }, []);
   useEffect(() => {
     if (reduced) {
-      prev.current = target;
+      shown.current = target;
       setVal(target);
       return;
     }
-    const from = prev.current, to = target;
+    // always animate FROM whatever is currently displayed — if the total
+    // updates mid-flight (anchors settling at boot) the count continues
+    // smoothly to the new total instead of restarting or overshooting
+    const from = shown.current, to = target;
     if (from === to) {
       setVal(to);
       return;
@@ -2412,9 +2417,10 @@ function useCountUp(target) {
     const step = (now) => {
       const p = Math.min(1, (now - t0) / dur);
       const e = 1 - Math.pow(1 - p, 3);
-      setVal(Math.round(from + (to - from) * e));
+      const v = Math.round(from + (to - from) * e);
+      shown.current = v;
+      setVal(v);
       if (p < 1) raf.current = requestAnimationFrame(step);
-      else prev.current = to;
     };
     cancelAnimationFrame(raf.current);
     raf.current = requestAnimationFrame(step);
@@ -2422,7 +2428,7 @@ function useCountUp(target) {
     // guarantee the number lands on the true value regardless
     const snap = setTimeout(() => {
       cancelAnimationFrame(raf.current);
-      prev.current = to;
+      shown.current = to;
       setVal(to);
     }, dur + 100);
     return () => { cancelAnimationFrame(raf.current); clearTimeout(snap); };
@@ -2559,7 +2565,7 @@ function Fab({ openSheet }) {
     openSheet(null);
   };
   const pick = (k) => { setFan(false); buzz(6); openSheet(k); };
-  const items = [["spend", "\u{1F4B8}", "Spend"], ["income", "\u{1F4B5}", "Income"], ["save", "\u{1F3E6}", "Stash"]];
+  const items = [["income", "\u{1F4B5}", "Income"], ["save", "\u{1F3E6}", "Stash"]];
   return /* @__PURE__ */ React.createElement(React.Fragment, null, fan && /* @__PURE__ */ React.createElement("div", { className: "fan-bg", onClick: () => setFan(false) }), fan && /* @__PURE__ */ React.createElement("div", { className: "fan" }, items.map(([k, ic, label], i) => /* @__PURE__ */ React.createElement("button", { key: k, type: "button", className: "fan-item", style: { animationDelay: i * 35 + "ms" }, onClick: () => pick(k) }, ic, " ", label))), /* @__PURE__ */ React.createElement("button", {
     className: "addbtn",
     "aria-label": "Add transaction",
@@ -2659,6 +2665,21 @@ const ICONS = {
     /* @__PURE__ */ React.createElement("path", { d: "M3.5 13.5 7 17l3.5-3.5" }),
     /* @__PURE__ */ React.createElement("path", { d: "M17 20V7" }),
     /* @__PURE__ */ React.createElement("path", { d: "M13.5 10.5 17 7l3.5 3.5" })
+  ),
+  trends: (on) => /* @__PURE__ */ React.createElement(
+    "svg",
+    {
+      viewBox: "0 0 24 24",
+      width: "22",
+      height: "22",
+      fill: "none",
+      stroke: "currentColor",
+      strokeWidth: on ? 2.4 : 1.8,
+      strokeLinecap: "round",
+      strokeLinejoin: "round"
+    },
+    /* @__PURE__ */ React.createElement("path", { d: "M3.5 17.5 9 11.5l3.5 3.5 7.5-8" }),
+    /* @__PURE__ */ React.createElement("path", { d: "M15.5 7h4.5v4.5" })
   ),
   settings: (on) => /* @__PURE__ */ React.createElement(
     "svg",
@@ -2782,6 +2803,10 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
   const { categories, settings, overrides, sinkingFunds } = data;
   const incomeRaw = data.income;
   const txnsRaw = data.txns;
+  // bank-truth mode: once accounts are connected (sfMap exists), spending
+  // and deposits come from the bank feed only — plan materializers and
+  // current-month plan entries stand down so nothing double-counts
+  const bankTruth = !!(data.sfMap && Object.keys(data.sfMap).length);
   const income = useMemo(() => {
     // Derive, don't store (§4.2): the CURRENT month's plan deposit is computed
     // live from the Income setting on every render. The stored recinc entry
@@ -2792,6 +2817,7 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     // newer than the plan suppresses the deposit (same rule as merge/effect).
     const id = "recinc-" + CURRENT_MONTH;
     const amt = settings.monthlyIncome || 0;
+    if (bankTruth) return incomeRaw.filter((e) => e.id !== id);
     if (amt <= 0) return incomeRaw;
     const deadTs = ((data.deleted || {}).income || []).reduce((mx, x) => {
       if (!x.startsWith(id + "@")) return mx;
@@ -2806,7 +2832,7 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     });
     if (!found) out.push({ id, date: CURRENT_MONTH + "-01", amount: amt, source: "Monthly income" });
     return out;
-  }, [incomeRaw, settings.monthlyIncome, settings.planTs, data.deleted]);
+  }, [incomeRaw, settings.monthlyIncome, settings.planTs, data.deleted, data.sfMap]);
   const merchantMap = data.merchantMap || {};
   const bills = data.bills || [];
   const txns = useMemo(() => {
@@ -2817,6 +2843,7 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     // by construction. Intentional deletes still win: savings honors a
     // timestamped tombstone newer than the plan (revivable, like the deposit);
     // bills honor any tombstone (their materializer never revives).
+    if (bankTruth) return txnsRaw.filter((t) => !(String(t.id).startsWith("rec") && String(t.id).indexOf(CURRENT_MONTH) !== -1));
     const deadTx = (data.deleted || {}).txns || [];
     let out = txnsRaw;
     const put = (id, amt, make) => {
@@ -2853,7 +2880,7 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
       }));
     });
     return out;
-  }, [txnsRaw, settings.monthlySavings, settings.planTs, data.deleted, data.bills, categories]);
+  }, [txnsRaw, settings.monthlySavings, settings.planTs, data.deleted, data.bills, categories, data.sfMap]);
   const simpleMode = true;
   const [sheetOpen, setSheetOpen] = useState(false);
   const [sheetKind, setSheetKind] = useState(null);
@@ -2863,7 +2890,7 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
   const [actView, setActView] = useState("spend");
   useEffect(() => {
     const amt = settings.monthlyIncome || 0;
-    if (amt <= 0) return;
+    if (amt <= 0 || bankTruth) return;
     const id = "recinc-" + CURRENT_MONTH;
     const deadTs = ((data.deleted || {}).income || []).reduce((mx, x) => {
       if (!x.startsWith(id + "@")) return mx;
@@ -2890,7 +2917,7 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     });
   }, [settings.monthlyIncome, incomeRaw, data.deleted, setData]);
   useEffect(() => {
-    if (!bills.length) return;
+    if (!bills.length || bankTruth) return;
     const deadTx = (data.deleted || {}).txns || [];
     const isDead = (list, id) => list.some((x) => x === id || x.startsWith(id + "@"));
     const missing = bills.filter((b) => {
@@ -2937,7 +2964,7 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
   });
   useEffect(() => {
     const amt = settings.monthlySavings || 0;
-    if (amt <= 0) return;
+    if (amt <= 0 || bankTruth) return;
     const id = "recsave-" + CURRENT_MONTH;
     const deadTs = ((data.deleted || {}).txns || []).reduce((mx, x) => {
       if (!x.startsWith(id + "@")) return mx;
@@ -3042,6 +3069,118 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
       ...upS ? { savingsAnchor: { cents: save, asOf: iso(saveTs), _ts: saveTs } } : {}
     } }));
   }, [sfBal, data.sfMap, settings.bankAnchor, settings.savingsAnchor, setData]);
+  // Balance history: each nightly pull is a commit — git history of the
+  // inbox file is a day-by-day balance series. Ingest unseen commits into
+  // data.sfHist { "YYYY-MM-DD": { bank, save } } (synced, capped).
+  useEffect(() => {
+    if (!syncCfg || !syncCfg.enabled || !syncCfg.repo || !syncCfg.token) return;
+    const roles = data.sfMap || {};
+    if (!Object.keys(roles).length) return;
+    let live = true;
+    const H = { "Authorization": "Bearer " + syncCfg.token, "Accept": "application/vnd.github+json" };
+    const iso = (ts) => {
+      const dd = new Date(ts), p = (n) => String(n).padStart(2, "0");
+      return dd.getFullYear() + "-" + p(dd.getMonth() + 1) + "-" + p(dd.getDate());
+    };
+    fetch("https://api.github.com/repos/" + syncCfg.repo + "/commits?path=simplefin-inbox.json&per_page=40", { headers: H }).then((r) => r.ok ? r.json() : []).then((commits) => {
+      if (!live || !Array.isArray(commits)) return;
+      const seen = data.sfShas || {};
+      const todo = commits.filter((c) => c && c.sha && !seen[c.sha]).slice(0, 12);
+      if (!todo.length) return;
+      return Promise.all(todo.map((c) => fetch("https://api.github.com/repos/" + syncCfg.repo + "/contents/simplefin-inbox.json?ref=" + c.sha, { headers: H }).then((r) => r.ok ? r.json() : null).then((j) => {
+        if (!j || !j.content) return null;
+        try {
+          return { sha: c.sha, parsed: JSON.parse(atob(j.content.replace(/\n/g, ""))) };
+        } catch (e) {
+          return null;
+        }
+      }).catch(() => null))).then((list) => {
+        if (!live) return;
+        const hist = {}, shas = {};
+        (list || []).forEach((it) => {
+          if (!it) return;
+          shas[it.sha] = 1;
+          let bank = 0, save = 0, ts = 0, hb = false, hs = false;
+          (it.parsed.balances || []).forEach((b) => {
+            if (!b || !b.account) return;
+            const cents = C.parseDollars(String(b.balance));
+            if (cents == null) return;
+            ts = Math.max(ts, (+b.date || 0) * 1000);
+            if (roles[b.account] === "bank") { hb = true; bank += cents; }
+            if (roles[b.account] === "save") { hs = true; save += cents; }
+          });
+          if (ts && (hb || hs)) {
+            const day = iso(ts);
+            if (!hist[day] || ts >= hist[day]._ts) hist[day] = { bank: hb ? bank : null, save: hs ? save : null, _ts: ts };
+          }
+        });
+        if (!Object.keys(shas).length) return;
+        setData((d) => {
+          const merged = { ...d.sfHist || {}, ...hist };
+          const days = Object.keys(merged).sort();
+          const keep = {};
+          days.slice(-120).forEach((k) => keep[k] = merged[k]);
+          return { ...d, sfShas: { ...d.sfShas || {}, ...shas }, sfHist: keep };
+        });
+      });
+    }).catch(() => {
+    });
+    return () => {
+      live = false;
+    };
+  }, [syncCfg, data.sfMap, data.sfShas, setData]);
+  // Auto-ledger: derive each day's spending and deposits from balance
+  // deltas. A drop in the bank = that day's spending, categorized from the
+  // day's round-up merchants (even split, labeled est.); a rise = a deposit.
+  // Derived ids start "sf-" so anchors never double-count them, and a
+  // deleted day stays deleted (tombstones honored).
+  useEffect(() => {
+    const hist = data.sfHist || {};
+    const days = Object.keys(hist).sort();
+    if (days.length < 2) return;
+    const roles = data.sfMap || {};
+    const R = window.BudgetReceipt;
+    const byDay = {};
+    (inbox || []).forEach((r) => {
+      if (!r || !r.date || r.kind !== "income" || roles[r.account] === "bank") return;
+      const m = /^round ?up from (.+)$/i.exec(r.label || "");
+      const o = byDay[r.date] = byDay[r.date] || { merch: [], inflow: 0 };
+      o.inflow += r.cents;
+      if (m) o.merch.push(m[1].trim());
+    });
+    const deadTx = (data.deleted || {}).txns || [];
+    const deadIn = (data.deleted || {}).income || [];
+    const now = Date.now();
+    const addT = [], addI = [];
+    for (let k = 1; k < days.length; k++) {
+      const day = days[k], prev = days[k - 1];
+      if (day >= TODAY) continue;
+      if (hist[day].bank == null || hist[prev].bank == null) continue;
+      const sid = "sf-d-" + day, iid = "sf-i-" + day;
+      if (txnsRaw.some((t) => String(t.id).startsWith(sid)) || incomeRaw.some((e) => e.id === iid)) continue;
+      if (deadTx.some((x) => x.startsWith(sid)) || deadIn.some((x) => x.startsWith(iid))) continue;
+      const delta = hist[day].bank - hist[prev].bank;
+      const dayInfo = byDay[day] || { merch: [], inflow: 0 };
+      if (delta < 0) {
+        const spendC = Math.max(0, -delta - dayInfo.inflow);
+        if (!spendC) continue;
+        if (dayInfo.merch.length) {
+          const per = Math.floor(spendC / dayInfo.merch.length);
+          let rem = spendC - per * dayInfo.merch.length;
+          dayInfo.merch.forEach((mName, j) => {
+            const cat = R ? R.guessCategory(mName, categories, merchantMap) : null;
+            addT.push({ id: sid + "-" + j, date: day, amount: per + (j === 0 ? rem : 0), categoryId: cat || null, merchant: mName + " (est.)", _m: now });
+          });
+        } else {
+          addT.push({ id: sid + "-0", date: day, amount: spendC, categoryId: null, merchant: "Card spending", _m: now });
+        }
+      } else if (delta > 0) {
+        addI.push({ id: iid, date: day, amount: delta + dayInfo.inflow, source: "Deposit (bank)", _m: now });
+      }
+    }
+    if (!addT.length && !addI.length) return;
+    setData((d) => ({ ...d, txns: [...d.txns, ...addT], income: [...d.income, ...addI] }));
+  }, [data.sfHist, inbox, txnsRaw, incomeRaw, data.sfMap, categories, merchantMap, setData]);
   const importInbox = (chosen, dismissedIds, mapping) => setData((d) => {
     const txns2 = [...d.txns], income2 = [...d.income];
     const map = { ...d.merchantMap || {} };
@@ -3351,7 +3490,7 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     adjustFund,
     rev
   };
-  const TABS = simpleMode ? [["home", "Home", "home"], ["activity", "Activity", "activity"], ["settings", "Settings", "settings"]] : [
+  const TABS = simpleMode ? [["home", "Home", "home"], ["activity", "Activity", "activity"], ["trends", "Trends", "trends"], ["settings", "Settings", "settings"]] : [
     ["home", "Home", "\u2302"],
     ["budget", "Budget", "\u25A6"],
     ["activity", "Activity", "\u21C5"],
@@ -3369,12 +3508,12 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
       setView: setActView,
       openAdd: () => setSheetOpen(true)
     }
-  ), effTab === "funds" && /* @__PURE__ */ React.createElement(Funds, { ...shared }), effTab === "settings" && /* @__PURE__ */ React.createElement(Settings, { ...shared, simpleMode, ...{ bills, addBill, removeBill }, ...{ setSetting, exportJSON, importJSON, resetSeed, syncCfg, setSyncCfg, syncInfo, runSync }, sfMap: data.sfMap || {}, setSfRole: (acct, role) => setData((d) => ({ ...d, sfMap: { ...d.sfMap || {}, [acct]: role } })) })), (effTab === "home" || effTab === "budget" || effTab === "activity") && /* @__PURE__ */ React.createElement(Fab, { openSheet: (k) => { setSheetKind(k); setSheetOpen(true); } }), sheetOpen &&/* @__PURE__ */ React.createElement(
+  ), effTab === "trends" && /* @__PURE__ */ React.createElement(Trends, { ...shared, sfHist: data.sfHist || {} }), effTab === "funds" && /* @__PURE__ */ React.createElement(Funds, { ...shared }), effTab === "settings" && /* @__PURE__ */ React.createElement(Settings, { ...shared, simpleMode, ...{ bills, addBill, removeBill }, ...{ setSetting, exportJSON, importJSON, resetSeed, syncCfg, setSyncCfg, syncInfo, runSync }, sfMap: data.sfMap || {}, setSfRole: (acct, role) => setData((d) => ({ ...d, sfMap: { ...d.sfMap || {}, [acct]: role } })) })), (effTab === "home" || effTab === "budget" || effTab === "activity") && /* @__PURE__ */ React.createElement(Fab, { openSheet: (k) => { setSheetKind(k); setSheetOpen(true); } }), sheetOpen &&/* @__PURE__ */ React.createElement(
     AddSheet,
     {
       ...{ month, addTxn, addIncome, addBatch, categories, merchantMap },
       initial: sheetInit,
-      initialKind: sheetKind || (effTab === "activity" && actView === "income" ? "income" : "spend"),
+      initialKind: sheetKind || "income",
       simpleMode,
       close: () => { setSheetOpen(false); setSheetKind(null); setSheetInit(null); }
     }
@@ -3630,17 +3769,13 @@ function SimpleHome(p) {
     },
     /* @__PURE__ */ React.createElement("span", { className: "b-ic" }, b.icon),
     b.label
-  ))), v && monthNet > 0 && cents > 0 && /* @__PURE__ */ React.createElement("div", { className: "impact" }, /* @__PURE__ */ React.createElement("div", { className: "meter " + (v.verdict === "RED" ? "crit-track" : v.verdict === "AMBER" ? "warn-track" : "") }, /* @__PURE__ */ React.createElement("i", { style: { width: Math.max(0, Math.min(100, v.leftAfter / monthNet * 100)) + "%" } })), /* @__PURE__ */ React.createElement("div", { className: "impact-cap" }, v.leftAfter >= 0 ? money(v.leftAfter) + " left this month after this" : money(-v.leftAfter) + " over for the month")), v && /* @__PURE__ */ React.createElement("div", { className: "verdict " + v.verdict.toLowerCase(), role: "status" }, /* @__PURE__ */ React.createElement("span", { className: "v-ic" }, copy.ic), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("b", null, copy.head), /* @__PURE__ */ React.createElement("span", { className: "v-sub" }, copy.sub))), v && /* @__PURE__ */ React.createElement("div", { className: "logit-row" }, /* @__PURE__ */ React.createElement("button", { className: "logit", onClick: () => {
-    const bc = { food: "gro", gas: "trans", bills: "bills" }[bucket];
-    p.openAdd({ amount: amt, categoryId: bc && p.catById[bc] ? bc : "" });
-    setAmt("");
-  } }, "Log as spent"), v.verdict !== "RED" && bucket !== "emergency" && inProgress && /* @__PURE__ */ React.createElement("button", { className: "logit stash", onClick: () => {
+  ))), v && monthNet > 0 && cents > 0 && /* @__PURE__ */ React.createElement("div", { className: "impact" }, /* @__PURE__ */ React.createElement("div", { className: "meter " + (v.verdict === "RED" ? "crit-track" : v.verdict === "AMBER" ? "warn-track" : "") }, /* @__PURE__ */ React.createElement("i", { style: { width: Math.max(0, Math.min(100, v.leftAfter / monthNet * 100)) + "%" } })), /* @__PURE__ */ React.createElement("div", { className: "impact-cap" }, v.leftAfter >= 0 ? money(v.leftAfter) + " left this month after this" : money(-v.leftAfter) + " over for the month")), v && /* @__PURE__ */ React.createElement("div", { className: "verdict " + v.verdict.toLowerCase(), role: "status" }, /* @__PURE__ */ React.createElement("span", { className: "v-ic" }, copy.ic), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("b", null, copy.head), /* @__PURE__ */ React.createElement("span", { className: "v-sub" }, copy.sub))), v && v.verdict !== "RED" && bucket !== "emergency" && inProgress && /* @__PURE__ */ React.createElement("div", { className: "logit-row" }, /* @__PURE__ */ React.createElement("button", { className: "logit stash", onClick: () => {
     const savingCat = (p.categories || []).find((c) => c.class === "SAVING");
     if (p.addTxn({ date: TODAY, merchant: "Stashed instead", amount: amt, categoryId: savingCat ? savingCat.id : "" })) {
       buzz([8, 30, 8]);
       setAmt("");
     }
-  } }, "Stash it instead"))), /* @__PURE__ */ React.createElement("div", { className: "tilerow jar-center" }, /* @__PURE__ */ React.createElement("div", { className: "minitile" }, /* @__PURE__ */ React.createElement("div", { className: "mt-label" }, "Saved up"), /* @__PURE__ */ React.createElement(AnimatedFmt0, { className: "mt-val", cents: savedTotal }), (settings.savingsGoal || 0) > 0 && /* @__PURE__ */ React.createElement("div", { className: "goal-eta", style: { marginTop: 3 } }, "of ", fmt0(settings.savingsGoal), " goal")), /* @__PURE__ */ React.createElement(Jar, { level: savingsLevel, size: 46, tid: "saved" }), /* @__PURE__ */ React.createElement("div", { className: "minitile" }, /* @__PURE__ */ React.createElement("div", { className: "mt-label" }, "Safety net"), /* @__PURE__ */ React.createElement("div", { className: "mt-val" }, runway === Infinity ? "\u2014" : runway.toFixed(1) + "mo"), /* @__PURE__ */ React.createElement("div", { className: "goal-eta", style: { marginTop: 3 } }, "if income stopped"))), dataMonths.length > 1 ? /* @__PURE__ */ React.createElement("section", { className: "card center" }, /* @__PURE__ */ React.createElement("div", { className: "eyebrow" }, "Month by month"), /* @__PURE__ */ React.createElement(NetChart, { ...{ income, txns, dataMonths, month, setMonth } })) : dataMonths.length === 0 ? /* @__PURE__ */ React.createElement("section", { className: "card center" }, /* @__PURE__ */ React.createElement("div", { className: "empty" }, /* @__PURE__ */ React.createElement("span", { className: "e-ic" }, "\u{1F4B5}"), "Tap ", /* @__PURE__ */ React.createElement("b", null, "+"), " and log your first deposit.")) : null);
+  } }, "Stash it instead"))), /* @__PURE__ */ React.createElement("div", { className: "tilerow jar-center" }, /* @__PURE__ */ React.createElement("div", { className: "minitile" }, /* @__PURE__ */ React.createElement("div", { className: "mt-label" }, "Saved up"), /* @__PURE__ */ React.createElement(AnimatedFmt0, { className: "mt-val", cents: savedTotal })), /* @__PURE__ */ React.createElement(Jar, { level: savingsLevel, size: 46, tid: "saved" }), /* @__PURE__ */ React.createElement("div", { className: "minitile" }, /* @__PURE__ */ React.createElement("div", { className: "mt-label" }, "Safety net"), /* @__PURE__ */ React.createElement("div", { className: "mt-val" }, runway === Infinity ? "\u2014" : runway.toFixed(1) + "mo"))), dataMonths.length > 1 ? null : dataMonths.length === 0 ? /* @__PURE__ */ React.createElement("section", { className: "card center" }, /* @__PURE__ */ React.createElement("div", { className: "empty" }, /* @__PURE__ */ React.createElement("span", { className: "e-ic" }, "\u{1F4B5}"), "Tap ", /* @__PURE__ */ React.createElement("b", null, "+"), " and log your first deposit.")) : null);
 }
 function EnvelopeRow({ r, compact, onTap }) {
   const pct = r.planned > 0 ? r.spent / r.planned : r.spent > 0 ? 1 : 0;
@@ -3768,6 +3903,41 @@ function NetChart({ income, txns, dataMonths, month, setMonth }) {
       ));
     })
   ));
+}
+function Trends(p) {
+  const { income, txns, dataMonths, month, setMonth, catById, sfHist } = p;
+  const catRows = useMemo(() => {
+    const sums = {};
+    txns.forEach((t) => {
+      if (t.isTransfer || C.monthOf(t.date) !== month) return;
+      const k = t.categoryId || "_un";
+      sums[k] = (sums[k] || 0) + t.amount;
+    });
+    return Object.keys(sums).map((k) => ({
+      id: k,
+      name: k === "_un" ? "Uncategorized" : catById[k] ? catById[k].name : k,
+      icon: k === "_un" ? "🏷" : catById[k] ? catById[k].icon : "",
+      cents: sums[k]
+    })).filter((r) => r.cents > 0).sort((a, b) => b.cents - a.cents);
+  }, [txns, month, catById]);
+  const catMax = Math.max(1, ...catRows.map((r) => r.cents));
+  const savePts = useMemo(() => {
+    const days = Object.keys(sfHist || {}).sort();
+    return days.map((d) => ({ d, v: sfHist[d] ? sfHist[d].save : null })).filter((x) => x.v != null).slice(-60);
+  }, [sfHist]);
+  const line = useMemo(() => {
+    if (savePts.length < 2) return null;
+    const W = 320, H = 92, P = 10;
+    const vs = savePts.map((x) => x.v);
+    const mn = Math.min(...vs), mx = Math.max(...vs), span = Math.max(1, mx - mn);
+    const pts = savePts.map((x, i) => (P + i * (W - 2 * P) / (savePts.length - 1)).toFixed(1) + "," + (H - P - (x.v - mn) / span * (H - 2 * P)).toFixed(1)).join(" ");
+    return { pts, W, H, last: savePts[savePts.length - 1], first: savePts[0] };
+  }, [savePts]);
+  const monthsHist = dataMonths.slice(-6).slice().reverse();
+  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h2", { className: "screen-title" }, "Trends"), /* @__PURE__ */ React.createElement("p", { className: "screen-sub" }, "History, and where the money goes."), dataMonths.length > 0 && /* @__PURE__ */ React.createElement("section", { className: "card center" }, /* @__PURE__ */ React.createElement("div", { className: "eyebrow" }, "Month by month"), /* @__PURE__ */ React.createElement(NetChart, { ...{ income, txns, dataMonths, month, setMonth } }), /* @__PURE__ */ React.createElement("div", { className: "chart-note" }, "Money in minus money out. Tap a month to view it everywhere.")), /* @__PURE__ */ React.createElement("section", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "eyebrow" }, "Where it went · ", monthLabel(month)), catRows.length === 0 && /* @__PURE__ */ React.createElement("div", { className: "empty", style: { padding: "14px 0 6px" } }, "No spending recorded for ", monthLabel(month), " yet."), catRows.map((r) => /* @__PURE__ */ React.createElement("div", { key: r.id, className: "row" }, /* @__PURE__ */ React.createElement("div", { className: "row-line" }, /* @__PURE__ */ React.createElement("span", { className: "row-name" }, /* @__PURE__ */ React.createElement("span", { className: "ic" }, r.icon), r.name), /* @__PURE__ */ React.createElement("span", { className: "row-amt" }, fmt0(r.cents))), /* @__PURE__ */ React.createElement("div", { className: "meter" }, /* @__PURE__ */ React.createElement("i", { style: { width: Math.min(100, r.cents / catMax * 100) + "%" } }))))), line && /* @__PURE__ */ React.createElement("section", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "eyebrow" }, "Savings over time"), /* @__PURE__ */ React.createElement("svg", { viewBox: "0 0 " + line.W + " " + line.H, width: "100%", "aria-label": "Savings balance history" }, /* @__PURE__ */ React.createElement("polyline", { points: line.pts, fill: "none", stroke: "var(--accent)", strokeWidth: "2.2", strokeLinejoin: "round", strokeLinecap: "round" })), /* @__PURE__ */ React.createElement("div", { className: "chart-note" }, monthShort(C.monthOf(line.first.d)), " ", +line.first.d.slice(8, 10), " ", fmt0(line.first.v), " → today ", fmt0(line.last.v))), monthsHist.length > 0 && /* @__PURE__ */ React.createElement("section", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "eyebrow" }, "By month"), monthsHist.map((m) => {
+    const inC = C.monthIncome(income, m), outC = C.monthSpend(txns, m);
+    return /* @__PURE__ */ React.createElement("div", { key: m, className: "row" }, /* @__PURE__ */ React.createElement("div", { className: "row-line" }, /* @__PURE__ */ React.createElement("span", { className: "row-name" }, monthLabel(m)), /* @__PURE__ */ React.createElement("span", { className: "row-amt" + (inC - outC < 0 ? " " : "") }, inC - outC >= 0 ? "+" : "", fmt0(inC - outC))), /* @__PURE__ */ React.createElement("div", { className: "row-meta" }, /* @__PURE__ */ React.createElement("span", null, fmt0(inC), " in · ", fmt0(outC), " out")));
+  })));
 }
 function Budget(p) {
   const { categories, txns, month, planned, setPlanned, unassigned, baseline, rev } = p;
@@ -3987,7 +4157,7 @@ function preprocessImage(img) {
   return canvas;
 }
 function AddSheet({ month, addTxn, addIncome, addBatch, categories, merchantMap, initial, initialKind, simpleMode, close }) {
-  const [kind, setKind] = useState(initialKind || "spend");
+  const [kind, setKind] = useState(initialKind === "save" ? "save" : "income");
   const defaultDate = month === CURRENT_MONTH ? TODAY : month + "-15";
   const [form, setForm] = useState({ date: defaultDate, merchant: "", amount: "", categoryId: "", ...initial || {} });
   const [scan, setScan] = useState({ phase: "idle", progress: 0, msg: "" });
@@ -4096,7 +4266,7 @@ function AddSheet({ month, addTxn, addIncome, addBatch, categories, merchantMap,
     if (chosen.length && addBatch(chosen, rowsDate)) close();
   };
   const busy = scan.phase === "loading" || scan.phase === "reading";
-  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "sheet-bg", onClick: close }), /* @__PURE__ */ React.createElement(DragSheetShell, { close },/* @__PURE__ */ React.createElement("h3", null, rows ? "Found " + rows.length + " items \u2014 check them" : "Add " + (kind === "income" ? "income" : kind === "save" ? "savings" : "spending")), !rows && /* @__PURE__ */ React.createElement("label", { className: "scanbtn" + (busy ? " busy" : "") }, /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "sheet-bg", onClick: close }), /* @__PURE__ */ React.createElement(DragSheetShell, { close },/* @__PURE__ */ React.createElement("h3", null, rows ? "Found " + rows.length + " items \u2014 check them" : "Add " + (kind === "income" ? "income" : kind === "save" ? "savings" : "spending")), false && /* @__PURE__ */ React.createElement("label", { className: "scanbtn" + (busy ? " busy" : "") }, /* @__PURE__ */ React.createElement(
     "input",
     {
       type: "file",
@@ -4137,7 +4307,7 @@ function AddSheet({ month, addTxn, addIncome, addBatch, categories, merchantMap,
   ))), /* @__PURE__ */ React.createElement("span", { className: "s-amt" + (r.kind === "income" ? " pos-amt" : r.kind === "refund" ? " ref-amt" : "") }, r.kind === "income" ? "+" : r.kind === "refund" ? "\u2212" : "", money(r.cents))))), /* @__PURE__ */ React.createElement("div", { className: "f-grid", style: { marginTop: 10 } }, /* @__PURE__ */ React.createElement("input", { type: "date", value: rowsDate, onChange: (e) => setRowsDate(e.target.value) }), /* @__PURE__ */ React.createElement("button", { className: "btn quiet", onClick: () => {
     setRows(null);
     setScan({ phase: "idle", progress: 0, msg: "" });
-  } }, "Back"), /* @__PURE__ */ React.createElement("button", { className: "save", onClick: importRows, disabled: !includedCount }, "Add ", includedCount, " item", includedCount === 1 ? "" : "s")), /* @__PURE__ */ React.createElement("div", { className: "hint" }, "Uses one date for all items \u2014 you can edit any of them later in Activity.")), !rows && /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "seg" }, /* @__PURE__ */ React.createElement("button", { className: kind === "spend" ? "on" : "", onClick: () => setKind("spend") }, "Spending"), /* @__PURE__ */ React.createElement("button", { className: kind === "income" ? "on" : "", onClick: () => setKind("income") }, "Income"), /* @__PURE__ */ React.createElement("button", { className: kind === "save" ? "on" : "", onClick: () => setKind("save") }, "Set aside")), /* @__PURE__ */ React.createElement("div", { className: "f-grid" }, /* @__PURE__ */ React.createElement(
+  } }, "Back"), /* @__PURE__ */ React.createElement("button", { className: "save", onClick: importRows, disabled: !includedCount }, "Add ", includedCount, " item", includedCount === 1 ? "" : "s")), /* @__PURE__ */ React.createElement("div", { className: "hint" }, "Uses one date for all items \u2014 you can edit any of them later in Activity.")), !rows && /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "seg" }, /* @__PURE__ */ React.createElement("button", { className: kind === "income" ? "on" : "", onClick: () => setKind("income") }, "Income"), /* @__PURE__ */ React.createElement("button", { className: kind === "save" ? "on" : "", onClick: () => setKind("save") }, "Set aside")), /* @__PURE__ */ React.createElement("div", { className: "f-grid" }, /* @__PURE__ */ React.createElement(
     "input",
     {
       className: "full",
@@ -4347,7 +4517,7 @@ function Settings(p) {
       title: "Bills",
       cap: (bills || []).length > 0 ? bills.length + (bills.length === 1 ? " bill \xB7 " : " bills \xB7 ") + fmt0(billTotal) + "/mo" : "none yet"
     },
-    /* @__PURE__ */ React.createElement("div", { className: "hint", style: { marginTop: 0 } }, "Logged as spending automatically on the 1st."),
+    /* @__PURE__ */ React.createElement("div", { className: "hint", style: { marginTop: 0 } }, "Used for planning. With bank sync on, the real payments arrive from the bank automatically."),
     (bills || []).map((b) => /* @__PURE__ */ React.createElement("div", { key: b.id, className: "txrow" }, /* @__PURE__ */ React.createElement("div", { className: "tx-main" }, /* @__PURE__ */ React.createElement("div", { className: "tx-merch" }, b.name)), /* @__PURE__ */ React.createElement("span", { className: "tx-amt" }, money(b.cents)), /* @__PURE__ */ React.createElement(DeleteX, { onDelete: () => removeBill(b.id) }))),
     (bills || []).length > 0 && /* @__PURE__ */ React.createElement("div", { className: "row-line", style: { padding: "10px 0 2px", borderTop: "1px solid var(--grid)" } }, /* @__PURE__ */ React.createElement("span", { className: "row-name" }, "Total each month"), /* @__PURE__ */ React.createElement("span", { className: "row-amt" }, money(billTotal))),
     /* @__PURE__ */ React.createElement("div", { className: "fund-actions" }, /* @__PURE__ */ React.createElement(
