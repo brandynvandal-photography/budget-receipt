@@ -494,6 +494,17 @@ body{background:linear-gradient(180deg,#16413a 0px,#10302b 300px,#0a1614 680px) 
 .tab-pane{animation:pane-in .22s ease both}
 @keyframes pane-in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 
+/* Stash-or-spend is the hero: first under the logo, enclosed mint-tinted
+   card, larger type. The balance bubbles become context below it. */
+.bankish{display:flex;flex-direction:column}
+.bankish .ask-card{order:-1;background:rgba(255,255,255,.05);
+  border:1px solid rgba(69,224,166,.22);border-radius:26px;
+  padding:24px 18px 20px;margin:6px 0 22px}
+.ask-card .ask-title{font-size:30px}
+.ask-card .ask-input{font-size:30px;padding:14px;border:1.5px solid rgba(69,224,166,.35)}
+.ask-input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(69,224,166,.15)}
+.bankish .swiper{margin-top:0}
+
 /* chart bars grow from the zero line */
 .nc-bar{animation:bar-in .5s cubic-bezier(.22,.61,.36,1) both}
 @keyframes bar-in{from{transform:scaleY(0)}to{transform:scaleY(1)}}
@@ -501,6 +512,7 @@ body{background:linear-gradient(180deg,#16413a 0px,#10302b 300px,#0a1614 680px) 
 /* savings jars: liquid rises as you save, drains as you spend */
 .jar-liq{transition:transform .7s cubic-bezier(.22,.61,.36,1)}
 .jarrow{display:flex;align-items:center;justify-content:center;gap:9px;margin-top:6px}
+.tilerow.jar-center{grid-template-columns:1fr auto 1fr;align-items:center;gap:10px}
 .jarhero{display:flex;align-items:center;justify-content:center;gap:12px}
 
 /* hero bubbles: active card has depth, neighbors recede */
@@ -2561,6 +2573,47 @@ function Fab({ openSheet }) {
     onClick: clicked
   }, fan ? "×" : "+"));
 }
+// Review sheet for bank rows pulled by the SimpleFIN Action. Modeled on the
+// receipt-scanner review: check/uncheck, fix kind, confirm. Unchecked rows
+// are remembered as dismissed so the inbox never re-offers them.
+function InboxSheet({ rows, unmapped, categories, merchantMap, importInbox, close }) {
+  const R = window.BudgetReceipt;
+  const [items, setItems] = useState(() => rows.map((r) => ({
+    ...r,
+    kind: r.kind === "spend" && /transfer|xfer|fidelity|vanguard|to savings/i.test(r.label || "") ? "transfer" : r.kind,
+    include: true,
+    categoryId: r.kind !== "income" && R ? R.guessCategory(r.label, categories, merchantMap) || "" : ""
+  })));
+  const [roles, setRoles] = useState(() => {
+    const o = {};
+    (unmapped || []).forEach((b) => {
+      o[b.account] = /fidelity|saving|invest|401|ira|broker|vanguard/i.test(b.account || "") ? "save" : "bank";
+    });
+    return o;
+  });
+  const included = items.filter((i) => i.include).length;
+  const save = () => {
+    importInbox(items.filter((i) => i.include), items.filter((i) => !i.include).map((i) => i.id), roles);
+    buzz([8, 30, 8]);
+    close();
+  };
+  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "sheet-bg", onClick: close }), /* @__PURE__ */ React.createElement(DragSheetShell, { close }, /* @__PURE__ */ React.createElement("h3", null, rows.length ? "From your bank — " + rows.length + " new" : "New bank connection"), (unmapped || []).length > 0 && /* @__PURE__ */ React.createElement("div", { style: { marginBottom: 10 } }, /* @__PURE__ */ React.createElement("div", { className: "hint", style: { margin: "0 0 6px" } }, "Where should each account count?"), unmapped.map((b) => {
+    const bc = C.parseDollars(String(b.balance));
+    return /* @__PURE__ */ React.createElement("div", { key: b.account, className: "scanrow" }, /* @__PURE__ */ React.createElement("div", { className: "s-main" }, /* @__PURE__ */ React.createElement("div", { className: "s-label" }, b.account), /* @__PURE__ */ React.createElement("div", { style: { color: "var(--muted)", fontSize: 12 } }, bc != null ? money(bc) : "")), /* @__PURE__ */ React.createElement("select", {
+      className: "catpick",
+      value: roles[b.account],
+      onChange: (e) => setRoles({ ...roles, [b.account]: e.target.value })
+    }, /* @__PURE__ */ React.createElement("option", { value: "bank" }, "In the bank"), /* @__PURE__ */ React.createElement("option", { value: "save" }, "Savings"), /* @__PURE__ */ React.createElement("option", { value: "ignore" }, "Ignore")));
+  })), items.length > 0 && /* @__PURE__ */ React.createElement("div", { className: "scanlist" }, items.map((r, i) => /* @__PURE__ */ React.createElement("div", { key: r.id, className: "scanrow" }, /* @__PURE__ */ React.createElement("input", {
+    type: "checkbox",
+    checked: r.include,
+    onChange: () => setItems(items.map((x, j) => j === i ? { ...x, include: !x.include } : x))
+  }), /* @__PURE__ */ React.createElement("div", { className: "s-main" }, /* @__PURE__ */ React.createElement("div", { className: "s-label" }, r.label), /* @__PURE__ */ React.createElement("div", { className: "s-controls" }, /* @__PURE__ */ React.createElement("span", { style: { alignSelf: "center", color: "var(--muted)", fontSize: 12 } }, monthShort(C.monthOf(r.date)), " ", +r.date.slice(8, 10)), /* @__PURE__ */ React.createElement("select", {
+    className: "catpick kindpick",
+    value: r.kind,
+    onChange: (e) => setItems(items.map((x, j) => j === i ? { ...x, kind: e.target.value } : x))
+  }, /* @__PURE__ */ React.createElement("option", { value: "spend" }, "spending"), /* @__PURE__ */ React.createElement("option", { value: "income" }, "income"), /* @__PURE__ */ React.createElement("option", { value: "refund" }, "refund"), /* @__PURE__ */ React.createElement("option", { value: "transfer" }, "transfer")))), /* @__PURE__ */ React.createElement("span", { className: "s-amt" + (r.kind === "income" ? " pos-amt" : r.kind === "refund" ? " ref-amt" : "") }, r.kind === "income" ? "+" : r.kind === "refund" ? "−" : "", money(r.cents))))), /* @__PURE__ */ React.createElement("div", { className: "f-grid", style: { marginTop: 10 } }, /* @__PURE__ */ React.createElement("button", { className: "btn quiet", onClick: close }, "Later"), /* @__PURE__ */ React.createElement("button", { className: "save", style: { gridColumn: "auto" }, onClick: save }, included ? "Add " + included : "Skip all")), /* @__PURE__ */ React.createElement("div", { className: "hint" }, "Unchecked rows won't be offered again. Savings-mapped accounts count by balance, not transactions; transfers never count as spending.")));
+}
 // Savings jar: a mason jar whose liquid rises as you save and drains as you
 // spend. level 0..1; the liquid animates between levels (reduced-motion snaps).
 function Jar({ level, size, tint, tid }) {
@@ -2805,6 +2858,8 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
   const [sheetOpen, setSheetOpen] = useState(false);
   const [sheetKind, setSheetKind] = useState(null);
   const [sheetInit, setSheetInit] = useState(null);
+  const [inbox, setInbox] = useState(null);
+  const [sfBal, setSfBal] = useState(null);
   const [actView, setActView] = useState("spend");
   useEffect(() => {
     const amt = settings.monthlyIncome || 0;
@@ -2903,6 +2958,115 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
       }] };
     });
   }, [settings.monthlySavings, txnsRaw, data.deleted, categories, setData]);
+  // SimpleFIN inbox: a GitHub Action in the sync repo drops bank rows into
+  // simplefin-inbox.json. New rows surface for one-tap review — suggested,
+  // never auto-committed, same philosophy as the receipt scanner.
+  useEffect(() => {
+    if (!syncCfg || !syncCfg.enabled || !syncCfg.repo || !syncCfg.token) return;
+    let live = true;
+    fetch("https://api.github.com/repos/" + syncCfg.repo + "/contents/simplefin-inbox.json", {
+      headers: { "Authorization": "Bearer " + syncCfg.token, "Accept": "application/vnd.github+json" }
+    }).then((r) => r.ok ? r.json() : null).then((j) => {
+      if (!live || !j || !j.content) return;
+      try {
+        const parsed = JSON.parse(atob(j.content.replace(/\n/g, "")));
+        setInbox(Array.isArray(parsed.rows) ? parsed.rows : []);
+        setSfBal(Array.isArray(parsed.balances) ? parsed.balances : []);
+      } catch (e) {
+      }
+    }).catch(() => {
+    });
+    return () => {
+      live = false;
+    };
+  }, [syncCfg]);
+  const inboxNew = useMemo(() => {
+    if (!inbox || !inbox.length) return [];
+    const seen = data.sfSeen || {};
+    const roles = data.sfMap || {};
+    // savings/ignored accounts contribute their BALANCE only — offering
+    // their transactions would double-count transfers
+    return inbox.filter((r) => r && r.id && r.date && r.cents > 0 && roles[r.account] !== "save" && roles[r.account] !== "ignore" && !seen["sf-" + r.id] && !txnsRaw.some((t) => t.id === "sf-" + r.id) && !incomeRaw.some((e) => e.id === "sf-" + r.id));
+  }, [inbox, data.sfSeen, data.sfMap, txnsRaw, incomeRaw]);
+  // zero-touch: new accounts assign their own role by name (savings-ish
+  // names, e.g. "Chime Savings"/"Fidelity", pool into Savings; the rest is
+  // In the bank), then bank-role rows auto-import with guessed categories
+  // and transfer detection. Data flows in silently; goals, plans, and
+  // settings stay human. Everything imported remains editable in Activity,
+  // and roles can be overridden in Settings.
+  useEffect(() => {
+    const known = data.sfMap || {};
+    const names = {};
+    (sfBal || []).forEach((b) => { if (b && b.account) names[b.account] = 1; });
+    (inbox || []).forEach((r) => { if (r && r.account) names[r.account] = 1; });
+    const adds = {};
+    Object.keys(names).forEach((a) => {
+      if (!known[a]) adds[a] = /saving|fidelity|invest|401|ira|broker|vanguard/i.test(a) ? "save" : "bank";
+    });
+    if (Object.keys(adds).length) {
+      setData((d) => ({ ...d, sfMap: { ...d.sfMap || {}, ...adds } }));
+      return;
+    }
+    if (!inboxNew.length) return;
+    const R = window.BudgetReceipt;
+    importInbox(inboxNew.map((r) => {
+      const kind = r.kind === "spend" && /transfer|xfer|fidelity|vanguard|to savings/i.test(r.label || "") ? "transfer" : r.kind;
+      return { ...r, kind, categoryId: kind === "spend" && R ? R.guessCategory(r.label, categories, merchantMap) || "" : "" };
+    }), []);
+  }, [sfBal, inbox, inboxNew, data.sfMap]);
+  // source-of-truth: mapped balances auto-apply as anchors whenever the
+  // bank reports something newer than what we hold
+  useEffect(() => {
+    if (!sfBal || !sfBal.length) return;
+    const roles = data.sfMap || {};
+    let bank = 0, bankTs = 0, haveBank = false;
+    let save = 0, saveTs = 0, haveSave = false;
+    sfBal.forEach((b) => {
+      if (!b || !b.account) return;
+      const cents = C.parseDollars(String(b.balance));
+      if (cents == null) return;
+      const ts = (+b.date || 0) * 1000;
+      if (roles[b.account] === "bank") { haveBank = true; bank += cents; bankTs = Math.max(bankTs, ts); }
+      if (roles[b.account] === "save") { haveSave = true; save += cents; saveTs = Math.max(saveTs, ts); }
+    });
+    const iso = (ts) => {
+      const dd = new Date(ts), p = (n) => String(n).padStart(2, "0");
+      return dd.getFullYear() + "-" + p(dd.getMonth() + 1) + "-" + p(dd.getDate());
+    };
+    const upB = haveBank && bankTs > ((settings.bankAnchor || {})._ts || 0);
+    const upS = haveSave && saveTs > ((settings.savingsAnchor || {})._ts || 0);
+    if (!upB && !upS) return;
+    setData((d) => ({ ...d, settings: {
+      ...d.settings,
+      ...upB ? { bankAnchor: { cents: bank, asOf: iso(bankTs), _ts: bankTs } } : {},
+      ...upS ? { savingsAnchor: { cents: save, asOf: iso(saveTs), _ts: saveTs } } : {}
+    } }));
+  }, [sfBal, data.sfMap, settings.bankAnchor, settings.savingsAnchor, setData]);
+  const importInbox = (chosen, dismissedIds, mapping) => setData((d) => {
+    const txns2 = [...d.txns], income2 = [...d.income];
+    const map = { ...d.merchantMap || {} };
+    const seen2 = { ...d.sfSeen || {} };
+    chosen.forEach((r) => {
+      const id = "sf-" + r.id;
+      seen2[id] = 1;
+      if (r.kind === "income") income2.push({ id, date: r.date, amount: r.cents, source: r.label || "Deposit", _m: Date.now() });
+      else {
+        txns2.push({
+          id, date: r.date,
+          amount: r.kind === "refund" ? -r.cents : r.cents,
+          categoryId: r.kind === "transfer" ? null : r.categoryId || null,
+          merchant: r.label || "",
+          _m: Date.now(),
+          ...r.kind === "transfer" ? { isTransfer: 1 } : {}
+        });
+        if (r.kind !== "transfer") learn(map, r.label, r.categoryId);
+      }
+    });
+    (dismissedIds || []).forEach((rid) => {
+      seen2["sf-" + rid] = 1;
+    });
+    return { ...d, txns: txns2, income: income2, merchantMap: map, sfSeen: seen2, sfMap: { ...d.sfMap || {}, ...mapping || {} } };
+  });
   const dataMonths = useMemo(() => C.monthsWithData(income, txns), [income, txns]);
   const allMonths = useMemo(() => {
     const set = {};
@@ -2938,14 +3102,24 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     });
     return m;
   }, [categories]);
-  const savedTotal = useMemo(
-    () => (settings.savedStart || 0) + txns.reduce((sum, t) => !t.isTransfer && savingIds[t.categoryId] ? sum + t.amount : sum, 0),
-    [txns, savingIds, settings.savedStart]
-  );
+  const savedTotal = useMemo(() => {
+    // source-of-truth mode: when a savings anchor exists (auto-set from
+    // mapped bank balances, e.g. Fidelity), Saved up = that truth plus any
+    // set-asides logged AFTER it — mirroring how availableNow treats the
+    // bank anchor. Without one, the original savedStart math applies.
+    const anch = settings.savingsAnchor;
+    if (anch && anch.cents != null) {
+      const after = (t) => !String(t.id || "").startsWith("rec") && !String(t.id || "").startsWith("sf-") && ((t._m || 0) > (anch._ts || 0) || t.date > anch.asOf);
+      return anch.cents + txns.reduce((sum, t) => !t.isTransfer && savingIds[t.categoryId] && after(t) ? sum + t.amount : sum, 0);
+    }
+    return (settings.savedStart || 0) + txns.reduce((sum, t) => !t.isTransfer && savingIds[t.categoryId] ? sum + t.amount : sum, 0);
+  }, [txns, savingIds, settings.savedStart, settings.savingsAnchor]);
   const anchor = settings.bankAnchor;
   const availableNow = useMemo(() => {
     if (!anchor) return null;
-    const affects = (x) => !String(x.id || "").startsWith("rec") && ((x._m || 0) > (anchor._ts || 0) || x.date > anchor.asOf);
+    // rec* (plan entries) and sf-* (bank-imported rows) never adjust the
+    // anchor: the first are plans, the second are already IN the balance
+    const affects = (x) => !String(x.id || "").startsWith("rec") && !String(x.id || "").startsWith("sf-") && ((x._m || 0) > (anchor._ts || 0) || x.date > anchor.asOf);
     const inflow = income.reduce((sum, e) => affects(e) ? sum + e.amount : sum, 0);
     const outflow = txns.reduce((sum, t) => !t.isTransfer && affects(t) ? sum + t.amount : sum, 0);
     return anchor.cents + inflow - outflow;
@@ -3195,7 +3369,7 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
       setView: setActView,
       openAdd: () => setSheetOpen(true)
     }
-  ), effTab === "funds" && /* @__PURE__ */ React.createElement(Funds, { ...shared }), effTab === "settings" && /* @__PURE__ */ React.createElement(Settings, { ...shared, simpleMode, ...{ bills, addBill, removeBill }, ...{ setSetting, exportJSON, importJSON, resetSeed, syncCfg, setSyncCfg, syncInfo, runSync } })), (effTab === "home" || effTab === "budget" || effTab === "activity") && /* @__PURE__ */ React.createElement(Fab, { openSheet: (k) => { setSheetKind(k); setSheetOpen(true); } }), sheetOpen &&/* @__PURE__ */ React.createElement(
+  ), effTab === "funds" && /* @__PURE__ */ React.createElement(Funds, { ...shared }), effTab === "settings" && /* @__PURE__ */ React.createElement(Settings, { ...shared, simpleMode, ...{ bills, addBill, removeBill }, ...{ setSetting, exportJSON, importJSON, resetSeed, syncCfg, setSyncCfg, syncInfo, runSync }, sfMap: data.sfMap || {}, setSfRole: (acct, role) => setData((d) => ({ ...d, sfMap: { ...d.sfMap || {}, [acct]: role } })) })), (effTab === "home" || effTab === "budget" || effTab === "activity") && /* @__PURE__ */ React.createElement(Fab, { openSheet: (k) => { setSheetKind(k); setSheetOpen(true); } }), sheetOpen &&/* @__PURE__ */ React.createElement(
     AddSheet,
     {
       ...{ month, addTxn, addIncome, addBatch, categories, merchantMap },
@@ -3431,7 +3605,7 @@ function SimpleHome(p) {
       onClick: () => p.setTab("settings")
     },
     "Set your balance in Settings \u2192"
-  )), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "Left over \xB7 ", monthLabel(month)), /* @__PURE__ */ React.createElement("div", { className: "jarhero" }, /* @__PURE__ */ React.createElement(AnimatedFmt0, { cents: monthNet, className: "bank-val" + (monthNet < 0 ? " overspent" : "") }), /* @__PURE__ */ React.createElement(Jar, { level: leftLevel, size: 30, tint: monthNet < 0 ? "var(--crit)" : void 0, tid: "left" })), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, fmt0(monthIncomeC), " in \xB7 ", fmt0(outC), " out", savedMTD > 0 ? " \xB7 " + fmt0(savedMTD) + " saved" : ""), perDay != null && /* @__PURE__ */ React.createElement("div", { className: "perday" }, "\u2248 ", money(perDay), "/day \xB7 ", daysLeft, "d left")), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "On pace \xB7 ", monthLabel(month)), projectedEnd != null ? /* @__PURE__ */ React.createElement(AnimatedFmt0, { cents: projectedEnd, plus: true, className: "bank-val" + (projectedEnd < 0 ? " overspent" : "") }) : /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "bank-val", style: { opacity: 0.5 } }, "\u2014"), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, "a few days of spending and this shows where ", monthLabel(month), " is headed")))), /* @__PURE__ */ React.createElement("section", { className: "card center" }, /* @__PURE__ */ React.createElement("div", { className: "eyebrow ask-title" }, /* @__PURE__ */ React.createElement("span", { className: "ask-stash" }, "Stash"), " or ", /* @__PURE__ */ React.createElement("span", { className: "ask-spend" }, "spend"), "?"), /* @__PURE__ */ React.createElement(
+  )), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "Left over \xB7 ", monthLabel(month)), /* @__PURE__ */ React.createElement("div", { className: "jarhero" }, /* @__PURE__ */ React.createElement(AnimatedFmt0, { cents: monthNet, className: "bank-val" + (monthNet < 0 ? " overspent" : "") }), /* @__PURE__ */ React.createElement(Jar, { level: leftLevel, size: 30, tint: monthNet < 0 ? "var(--crit)" : void 0, tid: "left" })), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, fmt0(monthIncomeC), " in \xB7 ", fmt0(outC), " out", savedMTD > 0 ? " \xB7 " + fmt0(savedMTD) + " saved" : ""), perDay != null && /* @__PURE__ */ React.createElement("div", { className: "perday" }, "\u2248 ", money(perDay), "/day \xB7 ", daysLeft, "d left")), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "On pace \xB7 ", monthLabel(month)), projectedEnd != null ? /* @__PURE__ */ React.createElement(AnimatedFmt0, { cents: projectedEnd, plus: true, className: "bank-val" + (projectedEnd < 0 ? " overspent" : "") }) : /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "bank-val", style: { opacity: 0.5 } }, "\u2014"), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, "a few days of spending and this shows where ", monthLabel(month), " is headed")))), /* @__PURE__ */ React.createElement("section", { className: "card center ask-card" }, /* @__PURE__ */ React.createElement("div", { className: "eyebrow ask-title" }, /* @__PURE__ */ React.createElement("span", { className: "ask-stash" }, "Stash"), " or ", /* @__PURE__ */ React.createElement("span", { className: "ask-spend" }, "spend"), "?"), /* @__PURE__ */ React.createElement(
     "input",
     {
       className: "ask-input",
@@ -3466,7 +3640,7 @@ function SimpleHome(p) {
       buzz([8, 30, 8]);
       setAmt("");
     }
-  } }, "Stash it instead"))), /* @__PURE__ */ React.createElement("div", { className: "tilerow" }, /* @__PURE__ */ React.createElement("div", { className: "minitile" }, /* @__PURE__ */ React.createElement("div", { className: "mt-label" }, "Saved up"), /* @__PURE__ */ React.createElement("div", { className: "jarrow" }, /* @__PURE__ */ React.createElement(Jar, { level: savingsLevel, size: 24, tid: "saved" }), /* @__PURE__ */ React.createElement(AnimatedFmt0, { className: "mt-val", cents: savedTotal })), (settings.savingsGoal || 0) > 0 && /* @__PURE__ */ React.createElement("div", { className: "goal-eta", style: { marginTop: 3 } }, "of ", fmt0(settings.savingsGoal), " goal")), /* @__PURE__ */ React.createElement("div", { className: "minitile" }, /* @__PURE__ */ React.createElement("div", { className: "mt-label" }, "Safety net"), /* @__PURE__ */ React.createElement("div", { className: "mt-val" }, runway === Infinity ? "\u2014" : runway.toFixed(1) + "mo"))), dataMonths.length > 1 ? /* @__PURE__ */ React.createElement("section", { className: "card center" }, /* @__PURE__ */ React.createElement("div", { className: "eyebrow" }, "Month by month"), /* @__PURE__ */ React.createElement(NetChart, { ...{ income, txns, dataMonths, month, setMonth } })) : dataMonths.length === 0 ? /* @__PURE__ */ React.createElement("section", { className: "card center" }, /* @__PURE__ */ React.createElement("div", { className: "empty" }, /* @__PURE__ */ React.createElement("span", { className: "e-ic" }, "\u{1F4B5}"), "Tap ", /* @__PURE__ */ React.createElement("b", null, "+"), " and log your first deposit.")) : null);
+  } }, "Stash it instead"))), /* @__PURE__ */ React.createElement("div", { className: "tilerow jar-center" }, /* @__PURE__ */ React.createElement("div", { className: "minitile" }, /* @__PURE__ */ React.createElement("div", { className: "mt-label" }, "Saved up"), /* @__PURE__ */ React.createElement(AnimatedFmt0, { className: "mt-val", cents: savedTotal }), (settings.savingsGoal || 0) > 0 && /* @__PURE__ */ React.createElement("div", { className: "goal-eta", style: { marginTop: 3 } }, "of ", fmt0(settings.savingsGoal), " goal")), /* @__PURE__ */ React.createElement(Jar, { level: savingsLevel, size: 46, tid: "saved" }), /* @__PURE__ */ React.createElement("div", { className: "minitile" }, /* @__PURE__ */ React.createElement("div", { className: "mt-label" }, "Safety net"), /* @__PURE__ */ React.createElement("div", { className: "mt-val" }, runway === Infinity ? "\u2014" : runway.toFixed(1) + "mo"), /* @__PURE__ */ React.createElement("div", { className: "goal-eta", style: { marginTop: 3 } }, "if income stopped"))), dataMonths.length > 1 ? /* @__PURE__ */ React.createElement("section", { className: "card center" }, /* @__PURE__ */ React.createElement("div", { className: "eyebrow" }, "Month by month"), /* @__PURE__ */ React.createElement(NetChart, { ...{ income, txns, dataMonths, month, setMonth } })) : dataMonths.length === 0 ? /* @__PURE__ */ React.createElement("section", { className: "card center" }, /* @__PURE__ */ React.createElement("div", { className: "empty" }, /* @__PURE__ */ React.createElement("span", { className: "e-ic" }, "\u{1F4B5}"), "Tap ", /* @__PURE__ */ React.createElement("b", null, "+"), " and log your first deposit.")) : null);
 }
 function EnvelopeRow({ r, compact, onTap }) {
   const pct = r.planned > 0 ? r.spent / r.planned : r.spent > 0 ? 1 : 0;
@@ -4047,7 +4221,9 @@ function Settings(p) {
     runSync,
     bills,
     addBill,
-    removeBill
+    removeBill,
+    sfMap,
+    setSfRole
   } = p;
   const [billName, setBillName] = useState("");
   const [billAmt, setBillAmt] = useState("");
@@ -4287,6 +4463,12 @@ function Settings(p) {
       "Turn on sync"
     ) : JSON.stringify({ r: sc.repo.trim(), t: sc.token, p: sc.pass }) !== JSON.stringify({ r: (syncCfg.repo || "").trim(), t: syncCfg.token, p: syncCfg.pass }) ? /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: () => applySync(true) }, "Save changes & sync") : /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: runSync, disabled: syncInfo.running }, syncInfo.running ? "Syncing\u2026" : "Sync now"), " ", /* @__PURE__ */ React.createElement("button", { className: "btn quiet", onClick: () => applySync(false) }, "Turn off"))),
     syncInfo.msg && /* @__PURE__ */ React.createElement("div", { className: "sub", style: { marginTop: 8, color: syncInfo.err ? "var(--crit)" : "var(--good-text)" } }, syncInfo.err ? "\u26A0 " : "\u2713 ", syncInfo.msg),
+    Object.keys(sfMap || {}).length > 0 && /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "hint" }, "Connected accounts — where each one counts:"), Object.keys(sfMap).map((a) => /* @__PURE__ */ React.createElement("div", { className: "field", key: a }, /* @__PURE__ */ React.createElement("label", null, a), /* @__PURE__ */ React.createElement("select", {
+      className: "statepick",
+      style: { width: 150 },
+      value: sfMap[a],
+      onChange: (e) => setSfRole(a, e.target.value)
+    }, /* @__PURE__ */ React.createElement("option", { value: "bank" }, "In the bank"), /* @__PURE__ */ React.createElement("option", { value: "save" }, "Savings"), /* @__PURE__ */ React.createElement("option", { value: "ignore" }, "Ignore"))))),
     /* @__PURE__ */ React.createElement("div", { className: "hint" }, "Your token and passphrase are stored on this device so sync can run automatically \u2014 keep the token scoped with an expiry so a leak stays contained. Forget the passphrase and the synced copy is unrecoverable; your on-device data stays fine.")
   ), /* @__PURE__ */ React.createElement(Acc, { title: "Your data", cap: "export \xB7 import \xB7 start over" }, /* @__PURE__ */ React.createElement("div", { className: "btn-row", style: { marginTop: 0 } }, /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: exportJSON }, "Export backup"), /* @__PURE__ */ React.createElement("label", { className: "btn quiet filelabel" }, "Import backup", /* @__PURE__ */ React.createElement(
     "input",
