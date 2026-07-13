@@ -7,6 +7,8 @@
 <meta name="apple-mobile-web-app-title" content="Stash" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="theme-color" content="#16413a" />
+<link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png" />
+<link rel="icon" type="image/png" href="apple-touch-icon.png" />
 
 <meta name="robots" content="noindex" />
 <title>Stash</title>
@@ -445,6 +447,11 @@ body{background:linear-gradient(180deg,#16413a 0px,#10302b 300px,#0a1614 680px) 
 .quickamt{border:1px solid var(--grid);background:transparent;color:var(--ink2);border-radius:999px;
   padding:6px 14px;font-size:13.5px;font-weight:600;cursor:pointer;transition:transform .12s ease}
 .quickamt:active{transform:scale(.96)}
+.logit{display:block;width:100%;margin-top:10px;background:transparent;border:1px solid var(--grid);
+  color:var(--ink2);border-radius:999px;padding:10px 14px;font-size:13.5px;font-weight:600;cursor:pointer}
+.logit-row{display:flex;gap:8px;margin-top:10px}
+.logit-row .logit{margin-top:0;flex:1}
+.logit.stash{border-color:rgba(69,224,166,.45);color:var(--accent)}
 @media (prefers-reduced-motion: reduce){
   .meter > i,.verdict,.quickamt{transition:none;animation:none}
 }
@@ -491,6 +498,11 @@ body{background:linear-gradient(180deg,#16413a 0px,#10302b 300px,#0a1614 680px) 
 .nc-bar{animation:bar-in .5s cubic-bezier(.22,.61,.36,1) both}
 @keyframes bar-in{from{transform:scaleY(0)}to{transform:scaleY(1)}}
 
+/* savings jars: liquid rises as you save, drains as you spend */
+.jar-liq{transition:transform .7s cubic-bezier(.22,.61,.36,1)}
+.jarrow{display:flex;align-items:center;justify-content:center;gap:9px;margin-top:6px}
+.jarhero{display:flex;align-items:center;justify-content:center;gap:12px}
+
 /* hero bubbles: active card has depth, neighbors recede */
 .swipe-cell .bubble{transition:transform .35s cubic-bezier(.22,.61,.36,1),opacity .35s ease;
   transform:scale(.94);opacity:.55}
@@ -499,6 +511,7 @@ body{background:linear-gradient(180deg,#16413a 0px,#10302b 300px,#0a1614 680px) 
 @media (prefers-reduced-motion: reduce){
   .val-pulse,.meter > i,.sheet,.sheet-bg,.fan-item,.tab-pane,.nc-bar{animation:none}
   .swipe-cell .bubble{transition:none;transform:none;opacity:1}
+  .jar-liq{transition:none}
 }
 
 </style>
@@ -1092,21 +1105,65 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
   // leniency: 1 = neutral (discretionary). >1 = essential (food, gas, emergency)
   // — the soft AMBER warnings relax proportionally, but a hard RED (you truly
   // don't have the money / it tips the month negative) always stands.
-  function simpleVerdict(amount, leftThisMonth, projectedEnd, perDay, leniency) {
+  // ctx (all optional) unlocks the whole picture the app already knows:
+  //   { bank, cushion, burn, targetRunway, daysLeft }
+  // Without ctx, behavior is the original month-only model, unchanged.
+  //   RED  'bank'    — more than what's in the bank (hardest floor of all).
+  //   RED  'cushion' — an EMERGENCY even the safety net can't cover.
+  //   AMBER'net'     — emergency the month can't cover, but the net can:
+  //                    that's what it's for — route there, don't block.
+  //   AMBER'dent'    — a discretionary buy that pushes the safety net below
+  //                    its target: wants don't get to quietly spend the net.
+  //   AMBER'squeeze' — time-aware "most of what's left": what the DAILY
+  //                    budget becomes after this, given the days remaining.
+  //   trend is a gradient, not a gate: essentials only hear about a deficit
+  //   when the hole is deep relative to their slack.
+  function simpleVerdict(amount, leftThisMonth, projectedEnd, perDay, leniency, ctx) {
     var L = (leniency && leniency > 0) ? leniency : 1;
+    var x = ctx || {};
     var leftAfter = leftThisMonth - amount;
     var projAfter = projectedEnd == null ? null : projectedEnd - amount;
-    var verdict, reason;
+    var out = { leftAfter: leftAfter, projAfter: projAfter, leniency: L,
+      bank: x.bank != null ? x.bank : null, netAfter: null, runwayAfter: null, perDayAfter: null };
+    var done = function (v, r) { out.verdict = v; out.reason = r; return out; };
+    var paceTip = projAfter != null && projectedEnd >= 0 && projAfter < 0;
+    var bankShort = x.bank != null && amount > x.bank;
+    var isEmergency = L >= 3;
+    // §emergency: the this-month lens is the wrong lens. When the month (or
+    // the bank) can't cover it, route to the safety net instead of blocking.
+    if (isEmergency && x.cushion != null && (bankShort || leftAfter < 0 || paceTip)) {
+      if (amount > x.cushion) return done("RED", "cushion");
+      out.netAfter = x.cushion - amount;
+      out.runwayAfter = x.burn > 0 ? out.netAfter / x.burn : Infinity;
+      return done("AMBER", "net");
+    }
     // hard limits never bend
-    if (leftAfter < 0) { verdict = "RED"; reason = "left"; }
-    else if (projAfter != null && projectedEnd >= 0 && projAfter < 0) { verdict = "RED"; reason = "pace"; }
-    // soft warnings: essentials get more slack (lower "most of what's left"
-    // fraction, and a higher big-day multiple) before they warn
-    else if (leftThisMonth > 0 && leftAfter < leftThisMonth * (0.2 / L)) { verdict = "AMBER"; reason = "mostleft"; }
-    else if (projectedEnd != null && projectedEnd < 0 && L <= 1) { verdict = "AMBER"; reason = "trend"; }
-    else if (perDay != null && perDay > 0 && amount > perDay * 3 * L) { verdict = "AMBER"; reason = "bigday"; }
-    else { verdict = "GREEN"; reason = "ok"; }
-    return { leftAfter: leftAfter, projAfter: projAfter, verdict: verdict, reason: reason, leniency: L };
+    if (bankShort) return done("RED", "bank");
+    if (leftAfter < 0) return done("RED", "left");
+    if (paceTip) return done("RED", "pace");
+    // wants crossing under the runway target warn even when the month is fine
+    if (L <= 1 && x.cushion != null && x.burn > 0 && x.targetRunway > 0) {
+      var rb = x.cushion / x.burn, ra = (x.cushion - amount) / x.burn;
+      if (rb >= x.targetRunway && ra < x.targetRunway) {
+        out.runwayAfter = ra;
+        return done("AMBER", "dent");
+      }
+    }
+    // soft warnings: time-aware when daysLeft is known, original rules if not
+    var hasDays = x.daysLeft >= 1 && perDay != null && perDay > 0;
+    if (hasDays) {
+      out.perDayAfter = Math.floor(leftAfter / x.daysLeft);
+      if (out.perDayAfter < perDay * (0.5 / L)) return done("AMBER", "squeeze");
+    } else if (leftThisMonth > 0 && leftAfter < leftThisMonth * (0.2 / L)) {
+      return done("AMBER", "mostleft");
+    }
+    if (projectedEnd != null && projectedEnd < Math.min(0, -((perDay || 0) * 3 * (L - 1)))) {
+      return done("AMBER", "trend");
+    }
+    if (!hasDays && perDay != null && perDay > 0 && amount > perDay * 3 * L) {
+      return done("AMBER", "bigday");
+    }
+    return done("GREEN", "ok");
   }
 
   // spending buckets shown in the "Stash or spend?" picker, with how lenient
@@ -2149,6 +2206,31 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
     eq("fun bucket is stricter than neutral", C.bucketLeniency("fun") < 1, true);
     eq("unknown bucket defaults to neutral", C.bucketLeniency("nope"), 1);
 
+    /* ctx-aware verdicts: bank floor, emergency->net, runway dent, squeeze */
+    eq("bank floor beats month math => RED/bank",
+      C.simpleVerdict(C.c(500), C.c(1000), C.c(800), C.c(40), 1, { bank: C.c(300) }).reason, "bank");
+    eq("bank floor is RED",
+      C.simpleVerdict(C.c(500), C.c(1000), C.c(800), C.c(40), 1, { bank: C.c(300) }).verdict, "RED");
+    (function () {
+      var eCtx = { bank: C.c(800), cushion: C.c(3000), burn: C.c(1000), targetRunway: 3, daysLeft: 20 };
+      var em = C.simpleVerdict(C.c(1200), C.c(1000), C.c(800), C.c(40), 3, eCtx);
+      eq("emergency over the month routes to the net, not RED", em.verdict + "/" + em.reason, "AMBER/net");
+      ok("emergency reports runway after", Math.abs(em.runwayAfter - 1.8) < 1e-9, "got " + em.runwayAfter);
+      eq("emergency beyond the whole net stays RED/cushion",
+        C.simpleVerdict(C.c(4000), C.c(1000), C.c(800), C.c(40), 3, eCtx).reason, "cushion");
+    })();
+    eq("fun that dents runway below target => AMBER/dent",
+      C.simpleVerdict(C.c(200), C.c(1000), C.c(800), C.c(40), 0.8,
+        { bank: C.c(5000), cushion: C.c(3100), burn: C.c(1000), targetRunway: 3, daysLeft: 20 }).reason, "dent");
+    eq("time-aware squeeze replaces mostleft/bigday",
+      C.simpleVerdict(C.c(700), C.c(1000), C.c(900), C.c(40), 1, { bank: C.c(5000), daysLeft: 20 }).reason, "squeeze");
+    eq("essential slack applies to squeeze too",
+      C.simpleVerdict(C.c(700), C.c(1000), C.c(900), C.c(40), 2, { bank: C.c(5000), daysLeft: 20 }).verdict, "GREEN");
+    eq("mild deficit doesn't nag essentials (trend gradient)",
+      C.simpleVerdict(C.c(50), C.c(1000), -C.c(50), C.c(40), 1.5).verdict, "GREEN");
+    eq("deep deficit still warns essentials",
+      C.simpleVerdict(C.c(50), C.c(1000), -C.c(200), C.c(40), 1.5).reason, "trend");
+
     eq("Month derived from local date components", C.monthOf("2026-06-30"), "2026-06");
 
     /* fixes + v1 */
@@ -2324,7 +2406,14 @@ function useCountUp(target) {
     };
     cancelAnimationFrame(raf.current);
     raf.current = requestAnimationFrame(step);
-    return () => cancelAnimationFrame(raf.current);
+    // rAF is suspended in hidden/backgrounded tabs (and iOS Low Power) —
+    // guarantee the number lands on the true value regardless
+    const snap = setTimeout(() => {
+      cancelAnimationFrame(raf.current);
+      prev.current = to;
+      setVal(to);
+    }, dur + 100);
+    return () => { cancelAnimationFrame(raf.current); clearTimeout(snap); };
   }, [target, reduced]);
   return val;
 }
@@ -2471,6 +2560,19 @@ function Fab({ openSheet }) {
     onContextMenu: (e) => e.preventDefault(),
     onClick: clicked
   }, fan ? "×" : "+"));
+}
+// Savings jar: a mason jar whose liquid rises as you save and drains as you
+// spend. level 0..1; the liquid animates between levels (reduced-motion snaps).
+function Jar({ level, size, tint, tid }) {
+  const w = size || 26;
+  const lv = Math.max(0, Math.min(1, level || 0));
+  const fill = tint || "var(--accent)";
+  const clip = "jarclip-" + (tid || "j");
+  return /* @__PURE__ */ React.createElement("svg", { width: w, height: Math.round(w * 48 / 34), viewBox: "0 0 34 48", "aria-hidden": true }, /* @__PURE__ */ React.createElement("defs", null, /* @__PURE__ */ React.createElement("clipPath", { id: clip }, /* @__PURE__ */ React.createElement("rect", { x: 6.5, y: 13.5, width: 21, height: 29, rx: 4.5 }))), /* @__PURE__ */ React.createElement("g", { clipPath: "url(#" + clip + ")" }, /* @__PURE__ */ React.createElement("rect", {
+    className: "jar-liq",
+    x: 6.5, y: 13.5, width: 21, height: 29, fill,
+    style: { transform: "translateY(" + ((1 - lv) * 29).toFixed(1) + "px)" }
+  })), /* @__PURE__ */ React.createElement("rect", { x: 4.5, y: 12, width: 25, height: 32, rx: 6, fill: "none", stroke: "var(--ink2)", strokeWidth: 1.8 }), /* @__PURE__ */ React.createElement("rect", { x: 8, y: 3.5, width: 18, height: 6, rx: 2.2, fill: "none", stroke: "var(--ink2)", strokeWidth: 1.8 }), /* @__PURE__ */ React.createElement("path", { d: "M8.5 12 L8.5 9.5 M25.5 12 L25.5 9.5", stroke: "var(--ink2)", strokeWidth: 1.8 }));
 }
 const ICONS = {
   home: (on) => /* @__PURE__ */ React.createElement(
@@ -2702,6 +2804,7 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
   const simpleMode = true;
   const [sheetOpen, setSheetOpen] = useState(false);
   const [sheetKind, setSheetKind] = useState(null);
+  const [sheetInit, setSheetInit] = useState(null);
   const [actView, setActView] = useState("spend");
   useEffect(() => {
     const amt = settings.monthlyIncome || 0;
@@ -3082,7 +3185,7 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     ["settings", "Settings", "\u2699"]
   ];
   const effTab = simpleMode && (tab === "budget" || tab === "funds") ? "home" : tab;
-  return /* @__PURE__ */ React.createElement("div", { className: "shell" }, /* @__PURE__ */ React.createElement("header", { className: "top" }, /* @__PURE__ */ React.createElement("div", { className: "logo" }, "Stash")), month !== CURRENT_MONTH && /* @__PURE__ */ React.createElement("button", { className: "backnow", onClick: () => setMonth(CURRENT_MONTH) }, "Viewing ", monthLabel(month), " \xB7 back to ", monthLabel(CURRENT_MONTH), " \u2192"), /* @__PURE__ */ React.createElement("div", { key: effTab, className: "tab-pane" }, effTab === "home" && (simpleMode ? /* @__PURE__ */ React.createElement(SimpleHome, { ...shared, ...{ setSetting, addTxn, addIncome } }) : /* @__PURE__ */ React.createElement(Home, { ...shared })), effTab === "budget" && /* @__PURE__ */ React.createElement(Budget, { ...shared }), effTab === "activity" && /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement("div", { className: "shell" }, /* @__PURE__ */ React.createElement("header", { className: "top" }, /* @__PURE__ */ React.createElement("div", { className: "logo" }, "Stash")), month !== CURRENT_MONTH && /* @__PURE__ */ React.createElement("button", { className: "backnow", onClick: () => setMonth(CURRENT_MONTH) }, "Viewing ", monthLabel(month), " \xB7 back to ", monthLabel(CURRENT_MONTH), " \u2192"), /* @__PURE__ */ React.createElement("div", { key: effTab, className: "tab-pane" }, effTab === "home" && (simpleMode ? /* @__PURE__ */ React.createElement(SimpleHome, { ...shared, ...{ setSetting, addTxn, addIncome, openAdd: (init) => { setSheetInit(init); setSheetKind("spend"); setSheetOpen(true); } } }) : /* @__PURE__ */ React.createElement(Home, { ...shared })), effTab === "budget" && /* @__PURE__ */ React.createElement(Budget, { ...shared }), effTab === "activity" && /* @__PURE__ */ React.createElement(
     Activity,
     {
       ...shared,
@@ -3096,9 +3199,10 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     AddSheet,
     {
       ...{ month, addTxn, addIncome, addBatch, categories, merchantMap },
+      initial: sheetInit,
       initialKind: sheetKind || (effTab === "activity" && actView === "income" ? "income" : "spend"),
       simpleMode,
-      close: () => { setSheetOpen(false); setSheetKind(null); }
+      close: () => { setSheetOpen(false); setSheetKind(null); setSheetInit(null); }
     }
   ), /* @__PURE__ */ React.createElement("nav", { className: "tabbar" }, /* @__PURE__ */ React.createElement("div", { className: "tabbar-inner" }, TABS.map(([id, label, ic]) => /* @__PURE__ */ React.createElement("button", { key: id, className: "tb" + (effTab === id ? " on" : ""), onClick: () => setTab(id) }, /* @__PURE__ */ React.createElement("span", { className: "tb-ic" }, ICONS[ic] ? ICONS[ic](effTab === id) : ic), /* @__PURE__ */ React.createElement("span", { className: "tb-label" }, label), id === "activity" && uncat !== 0 && !simpleMode ? /* @__PURE__ */ React.createElement("span", { className: "dot" }) : null)))));
 }
@@ -3236,7 +3340,13 @@ function SimpleHome(p) {
   const [askFocus, setAskFocus] = useState(false);
   const cents = C.parseDollars(amt);
   const leniency = C.bucketLeniency(bucket);
-  const v = cents != null && cents > 0 ? C.simpleVerdict(cents, monthNet, projectedEnd, perDay, leniency) : null;
+  const v = cents != null && cents > 0 ? C.simpleVerdict(cents, monthNet, projectedEnd, perDay, leniency, {
+    bank: availableNow,
+    cushion: totalCushion,
+    burn,
+    targetRunway: settings.targetRunway,
+    daysLeft: inProgress ? daysRemaining : null
+  }) : null;
   const prevVerdict = useRef(null);
   useEffect(() => {
     const cur = v ? v.verdict : null;
@@ -3246,6 +3356,31 @@ function SimpleHome(p) {
     prevVerdict.current = cur;
   }, [v && v.verdict]);
   const copy = v && {
+    bank: {
+      ic: "\u2715",
+      head: "Stash it.",
+      sub: "That's more than what's in the bank \u2014 you have " + money(v.bank || 0) + " right now."
+    },
+    cushion: {
+      ic: "\u2715",
+      head: "Stash it.",
+      sub: "Even your safety net can't cover this \u2014 bank + savings comes to " + money(totalCushion) + "."
+    },
+    net: {
+      ic: "\u25b3",
+      head: "Use your safety net.",
+      sub: "An emergency is what it's for \u2014 you'd have " + money(v.netAfter || 0) + " of cover left" + (v.runwayAfter != null && v.runwayAfter !== Infinity ? " (\u2248 " + v.runwayAfter.toFixed(1) + " mo)" : "") + "."
+    },
+    dent: {
+      ic: "\u25b3",
+      head: "Your call.",
+      sub: "It fits the month, but it drops your safety net below your " + settings.targetRunway + "-month goal."
+    },
+    squeeze: {
+      ic: "\u25b3",
+      head: "Your call.",
+      sub: "That leaves about " + money(v.perDayAfter || 0) + "/day for the last " + daysRemaining + " days of " + monthLabel(month) + "."
+    },
     left: {
       ic: "\u2715",
       head: "Stash it.",
@@ -3274,10 +3409,14 @@ function SimpleHome(p) {
     ok: {
       ic: "\u2713",
       head: "Spend it.",
-      sub: leniency > 1 && cents > (perDay || 0) * 3 ? "Essentials get some slack \u2014 you'd have " + money(v.leftAfter) + " left this month." : "You'd still have " + money(v.leftAfter) + " left this month."
+      sub: (leniency > 1 && cents > (perDay || 0) * 3 ? "Essentials get some slack \u2014 you'd have " + money(v.leftAfter) + " left this month." : "You'd still have " + money(v.leftAfter) + " left this month.") + (leniency <= 1 && (settings.savingsGoal || 0) > 0 && savedTotal < settings.savingsGoal ? " Or stash it \u2014 " + money(cents) + " closer to your " + fmt0(settings.savingsGoal) + " goal." : "")
     }
   }[v.reason];
   const buckets = C.SPEND_BUCKETS;
+  // jar levels: savings fills toward the goal; the month's jar drains as
+  // spending eats the income (empty + red once overspent)
+  const savingsLevel = (settings.savingsGoal || 0) > 0 ? savedTotal / settings.savingsGoal : savedTotal > 0 ? 0.55 : 0;
+  const leftLevel = monthIncomeC > 0 ? monthNet / monthIncomeC : 0;
   return /* @__PURE__ */ React.createElement("div", { className: "bankish" }, /* @__PURE__ */ React.createElement(Swiper, { labels: ["In the bank", "Left over", "On pace"] }, /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "In the bank"), availableNow != null ? /* @__PURE__ */ React.createElement(
     AnimatedMoneySplit,
     {
@@ -3292,7 +3431,7 @@ function SimpleHome(p) {
       onClick: () => p.setTab("settings")
     },
     "Set your balance in Settings \u2192"
-  )), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "Left over \xB7 ", monthLabel(month)), /* @__PURE__ */ React.createElement(AnimatedFmt0, { cents: monthNet, className: "bank-val" + (monthNet < 0 ? " overspent" : "") }), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, fmt0(monthIncomeC), " in \xB7 ", fmt0(outC), " out", savedMTD > 0 ? " \xB7 " + fmt0(savedMTD) + " saved" : ""), perDay != null && /* @__PURE__ */ React.createElement("div", { className: "perday" }, "\u2248 ", money(perDay), "/day \xB7 ", daysLeft, "d left")), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "On pace \xB7 ", monthLabel(month)), projectedEnd != null ? /* @__PURE__ */ React.createElement(AnimatedFmt0, { cents: projectedEnd, plus: true, className: "bank-val" + (projectedEnd < 0 ? " overspent" : "") }) : /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "bank-val", style: { opacity: 0.5 } }, "\u2014"), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, "a few days of spending and this shows where ", monthLabel(month), " is headed")))), /* @__PURE__ */ React.createElement("section", { className: "card center" }, /* @__PURE__ */ React.createElement("div", { className: "eyebrow ask-title" }, /* @__PURE__ */ React.createElement("span", { className: "ask-stash" }, "Stash"), " or ", /* @__PURE__ */ React.createElement("span", { className: "ask-spend" }, "spend"), "?"), /* @__PURE__ */ React.createElement(
+  )), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "Left over \xB7 ", monthLabel(month)), /* @__PURE__ */ React.createElement("div", { className: "jarhero" }, /* @__PURE__ */ React.createElement(AnimatedFmt0, { cents: monthNet, className: "bank-val" + (monthNet < 0 ? " overspent" : "") }), /* @__PURE__ */ React.createElement(Jar, { level: leftLevel, size: 30, tint: monthNet < 0 ? "var(--crit)" : void 0, tid: "left" })), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, fmt0(monthIncomeC), " in \xB7 ", fmt0(outC), " out", savedMTD > 0 ? " \xB7 " + fmt0(savedMTD) + " saved" : ""), perDay != null && /* @__PURE__ */ React.createElement("div", { className: "perday" }, "\u2248 ", money(perDay), "/day \xB7 ", daysLeft, "d left")), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "On pace \xB7 ", monthLabel(month)), projectedEnd != null ? /* @__PURE__ */ React.createElement(AnimatedFmt0, { cents: projectedEnd, plus: true, className: "bank-val" + (projectedEnd < 0 ? " overspent" : "") }) : /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "bank-val", style: { opacity: 0.5 } }, "\u2014"), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, "a few days of spending and this shows where ", monthLabel(month), " is headed")))), /* @__PURE__ */ React.createElement("section", { className: "card center" }, /* @__PURE__ */ React.createElement("div", { className: "eyebrow ask-title" }, /* @__PURE__ */ React.createElement("span", { className: "ask-stash" }, "Stash"), " or ", /* @__PURE__ */ React.createElement("span", { className: "ask-spend" }, "spend"), "?"), /* @__PURE__ */ React.createElement(
     "input",
     {
       className: "ask-input",
@@ -3317,7 +3456,17 @@ function SimpleHome(p) {
     },
     /* @__PURE__ */ React.createElement("span", { className: "b-ic" }, b.icon),
     b.label
-  ))), v && monthNet > 0 && cents > 0 && /* @__PURE__ */ React.createElement("div", { className: "impact" }, /* @__PURE__ */ React.createElement("div", { className: "meter " + (v.verdict === "RED" ? "crit-track" : v.verdict === "AMBER" ? "warn-track" : "") }, /* @__PURE__ */ React.createElement("i", { style: { width: Math.max(0, Math.min(100, v.leftAfter / monthNet * 100)) + "%" } })), /* @__PURE__ */ React.createElement("div", { className: "impact-cap" }, v.leftAfter >= 0 ? money(v.leftAfter) + " left this month after this" : money(-v.leftAfter) + " over for the month")), v && /* @__PURE__ */ React.createElement("div", { className: "verdict " + v.verdict.toLowerCase(), role: "status" }, /* @__PURE__ */ React.createElement("span", { className: "v-ic" }, copy.ic), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("b", null, copy.head), /* @__PURE__ */ React.createElement("span", { className: "v-sub" }, copy.sub)))), /* @__PURE__ */ React.createElement("div", { className: "tilerow" }, /* @__PURE__ */ React.createElement("div", { className: "minitile" }, /* @__PURE__ */ React.createElement("div", { className: "mt-label" }, "Saved up"), /* @__PURE__ */ React.createElement(AnimatedFmt0, { className: "mt-val", cents: savedTotal }), (settings.savingsGoal || 0) > 0 && /* @__PURE__ */ React.createElement("div", { className: "meter", style: { marginTop: 5 } }, /* @__PURE__ */ React.createElement("i", { style: { width: Math.min(100, Math.max(0, savedTotal / settings.savingsGoal * 100)) + "%" } }))), /* @__PURE__ */ React.createElement("div", { className: "minitile" }, /* @__PURE__ */ React.createElement("div", { className: "mt-label" }, "Safety net"), /* @__PURE__ */ React.createElement("div", { className: "mt-val" }, runway === Infinity ? "\u2014" : runway.toFixed(1) + "mo"))), dataMonths.length > 1 ? /* @__PURE__ */ React.createElement("section", { className: "card center" }, /* @__PURE__ */ React.createElement("div", { className: "eyebrow" }, "Month by month"), /* @__PURE__ */ React.createElement(NetChart, { ...{ income, txns, dataMonths, month, setMonth } })) : dataMonths.length === 0 ? /* @__PURE__ */ React.createElement("section", { className: "card center" }, /* @__PURE__ */ React.createElement("div", { className: "empty" }, /* @__PURE__ */ React.createElement("span", { className: "e-ic" }, "\u{1F4B5}"), "Tap ", /* @__PURE__ */ React.createElement("b", null, "+"), " and log your first deposit.")) : null);
+  ))), v && monthNet > 0 && cents > 0 && /* @__PURE__ */ React.createElement("div", { className: "impact" }, /* @__PURE__ */ React.createElement("div", { className: "meter " + (v.verdict === "RED" ? "crit-track" : v.verdict === "AMBER" ? "warn-track" : "") }, /* @__PURE__ */ React.createElement("i", { style: { width: Math.max(0, Math.min(100, v.leftAfter / monthNet * 100)) + "%" } })), /* @__PURE__ */ React.createElement("div", { className: "impact-cap" }, v.leftAfter >= 0 ? money(v.leftAfter) + " left this month after this" : money(-v.leftAfter) + " over for the month")), v && /* @__PURE__ */ React.createElement("div", { className: "verdict " + v.verdict.toLowerCase(), role: "status" }, /* @__PURE__ */ React.createElement("span", { className: "v-ic" }, copy.ic), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("b", null, copy.head), /* @__PURE__ */ React.createElement("span", { className: "v-sub" }, copy.sub))), v && /* @__PURE__ */ React.createElement("div", { className: "logit-row" }, /* @__PURE__ */ React.createElement("button", { className: "logit", onClick: () => {
+    const bc = { food: "gro", gas: "trans", bills: "bills" }[bucket];
+    p.openAdd({ amount: amt, categoryId: bc && p.catById[bc] ? bc : "" });
+    setAmt("");
+  } }, "Log as spent"), v.verdict !== "RED" && bucket !== "emergency" && inProgress && /* @__PURE__ */ React.createElement("button", { className: "logit stash", onClick: () => {
+    const savingCat = (p.categories || []).find((c) => c.class === "SAVING");
+    if (p.addTxn({ date: TODAY, merchant: "Stashed instead", amount: amt, categoryId: savingCat ? savingCat.id : "" })) {
+      buzz([8, 30, 8]);
+      setAmt("");
+    }
+  } }, "Stash it instead"))), /* @__PURE__ */ React.createElement("div", { className: "tilerow" }, /* @__PURE__ */ React.createElement("div", { className: "minitile" }, /* @__PURE__ */ React.createElement("div", { className: "mt-label" }, "Saved up"), /* @__PURE__ */ React.createElement("div", { className: "jarrow" }, /* @__PURE__ */ React.createElement(Jar, { level: savingsLevel, size: 24, tid: "saved" }), /* @__PURE__ */ React.createElement(AnimatedFmt0, { className: "mt-val", cents: savedTotal })), (settings.savingsGoal || 0) > 0 && /* @__PURE__ */ React.createElement("div", { className: "goal-eta", style: { marginTop: 3 } }, "of ", fmt0(settings.savingsGoal), " goal")), /* @__PURE__ */ React.createElement("div", { className: "minitile" }, /* @__PURE__ */ React.createElement("div", { className: "mt-label" }, "Safety net"), /* @__PURE__ */ React.createElement("div", { className: "mt-val" }, runway === Infinity ? "\u2014" : runway.toFixed(1) + "mo"))), dataMonths.length > 1 ? /* @__PURE__ */ React.createElement("section", { className: "card center" }, /* @__PURE__ */ React.createElement("div", { className: "eyebrow" }, "Month by month"), /* @__PURE__ */ React.createElement(NetChart, { ...{ income, txns, dataMonths, month, setMonth } })) : dataMonths.length === 0 ? /* @__PURE__ */ React.createElement("section", { className: "card center" }, /* @__PURE__ */ React.createElement("div", { className: "empty" }, /* @__PURE__ */ React.createElement("span", { className: "e-ic" }, "\u{1F4B5}"), "Tap ", /* @__PURE__ */ React.createElement("b", null, "+"), " and log your first deposit.")) : null);
 }
 function EnvelopeRow({ r, compact, onTap }) {
   const pct = r.planned > 0 ? r.spent / r.planned : r.spent > 0 ? 1 : 0;
@@ -3663,10 +3812,10 @@ function preprocessImage(img) {
   ctx.putImageData(d, 0, 0);
   return canvas;
 }
-function AddSheet({ month, addTxn, addIncome, addBatch, categories, merchantMap, initialKind, simpleMode, close }) {
+function AddSheet({ month, addTxn, addIncome, addBatch, categories, merchantMap, initial, initialKind, simpleMode, close }) {
   const [kind, setKind] = useState(initialKind || "spend");
   const defaultDate = month === CURRENT_MONTH ? TODAY : month + "-15";
-  const [form, setForm] = useState({ date: defaultDate, merchant: "", amount: "", categoryId: "" });
+  const [form, setForm] = useState({ date: defaultDate, merchant: "", amount: "", categoryId: "", ...initial || {} });
   const [scan, setScan] = useState({ phase: "idle", progress: 0, msg: "" });
   const [rows, setRows] = useState(null);
   const [rowsDate, setRowsDate] = useState(defaultDate);
