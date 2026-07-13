@@ -2624,16 +2624,81 @@ function App() {
   return /* @__PURE__ */ React.createElement(Main, { ...{ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, syncInfo, runSync } });
 }
 function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, syncInfo, runSync }) {
-  const { categories, txns, settings, overrides, sinkingFunds } = data;
+  const { categories, settings, overrides, sinkingFunds } = data;
   const incomeRaw = data.income;
+  const txnsRaw = data.txns;
   const income = useMemo(() => {
+    // Derive, don't store (§4.2): the CURRENT month's plan deposit is computed
+    // live from the Income setting on every render. The stored recinc entry
+    // still exists for history/sync, but whatever stale amount it carries is
+    // ignored for display and math — no more races with old markers, edits,
+    // or sync states. IN = plan + manual deposits, by construction.
+    // The one thing honored is an INTENTIONAL delete: a timestamped tombstone
+    // newer than the plan suppresses the deposit (same rule as merge/effect).
     const id = "recinc-" + CURRENT_MONTH;
     const amt = settings.monthlyIncome || 0;
     if (amt <= 0) return incomeRaw;
-    return incomeRaw.map((e) => e.id === id && !e.ue && e.source === "Monthly income" && e.amount !== amt ? { ...e, amount: amt } : e);
-  }, [incomeRaw, settings.monthlyIncome]);
+    const deadTs = ((data.deleted || {}).income || []).reduce((mx, x) => {
+      if (!x.startsWith(id + "@")) return mx;
+      return Math.max(mx, +x.split("@")[1] || 0);
+    }, 0);
+    if (deadTs && (settings.planTs || 0) <= deadTs) return incomeRaw;
+    let found = false;
+    const out = incomeRaw.map((e) => {
+      if (e.id !== id) return e;
+      found = true;
+      return e.amount === amt ? e : { ...e, amount: amt };
+    });
+    if (!found) out.push({ id, date: CURRENT_MONTH + "-01", amount: amt, source: "Monthly income" });
+    return out;
+  }, [incomeRaw, settings.monthlyIncome, settings.planTs, data.deleted]);
   const merchantMap = data.merchantMap || {};
   const bills = data.bills || [];
+  const txns = useMemo(() => {
+    // Derive, don't store — OUT side (mirror of the income fix): the current
+    // month's plan savings and bill instances are computed live from Settings
+    // on every render. Stored entries remain for history/sync; whatever stale
+    // amounts they carry are ignored. OUT = bills + savings + manual spending,
+    // by construction. Intentional deletes still win: savings honors a
+    // timestamped tombstone newer than the plan (revivable, like the deposit);
+    // bills honor any tombstone (their materializer never revives).
+    const deadTx = (data.deleted || {}).txns || [];
+    let out = txnsRaw;
+    const put = (id, amt, make) => {
+      let found = false;
+      out = out.map((t) => {
+        if (t.id !== id) return t;
+        found = true;
+        return t.amount === amt ? t : { ...t, amount: amt };
+      });
+      if (!found) out = [...out, make()];
+    };
+    const saveAmt = settings.monthlySavings || 0;
+    if (saveAmt > 0) {
+      const sid = "recsave-" + CURRENT_MONTH;
+      const deadTs = deadTx.reduce((mx, x) => {
+        if (!x.startsWith(sid + "@")) return mx;
+        return Math.max(mx, +x.split("@")[1] || 0);
+      }, 0);
+      if (!(deadTs && (settings.planTs || 0) <= deadTs)) {
+        const savingCat = categories.find((c) => c.class === "SAVING");
+        put(sid, saveAmt, () => ({
+          id: sid, date: CURRENT_MONTH + "-01", amount: saveAmt,
+          categoryId: savingCat ? savingCat.id : null, merchant: "Monthly savings"
+        }));
+      }
+    }
+    (data.bills || []).forEach((b) => {
+      if (!(b.cents > 0)) return;
+      const id = "recbill-" + b.id + "-" + CURRENT_MONTH;
+      if (deadTx.some((x) => x === id || x.startsWith(id + "@"))) return;
+      put(id, b.cents, () => ({
+        id, date: CURRENT_MONTH + "-01", amount: b.cents,
+        categoryId: "bills", merchant: b.name + " (bill)"
+      }));
+    });
+    return out;
+  }, [txnsRaw, settings.monthlySavings, settings.planTs, data.deleted, data.bills, categories]);
   const simpleMode = true;
   const [sheetOpen, setSheetOpen] = useState(false);
   const [sheetKind, setSheetKind] = useState(null);
@@ -2672,7 +2737,7 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     const isDead = (list, id) => list.some((x) => x === id || x.startsWith(id + "@"));
     const missing = bills.filter((b) => {
       const id = "recbill-" + b.id + "-" + CURRENT_MONTH;
-      return !isDead(deadTx, id) && !txns.some((t) => t.id === id);
+      return !isDead(deadTx, id) && !txnsRaw.some((t) => t.id === id);
     });
     if (!missing.length) return;
     setData((d) => {
@@ -2690,7 +2755,7 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
       }));
       return adds.length ? { ...d, txns: [...d.txns, ...adds] } : d;
     });
-  }, [bills, txns, data.deleted, setData]);
+  }, [bills, txnsRaw, data.deleted, setData]);
   const addBill = (name, amtStr) => {
     const cents = C.parseDollars(amtStr);
     if (cents == null || cents <= 0 || !name.trim()) return false;
@@ -2721,7 +2786,7 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
       return Math.max(mx, +x.split("@")[1] || 0);
     }, 0);
     if (deadTs && (settings.planTs || 0) <= deadTs) return;
-    if (txns.some((t) => t.id === id)) return;
+    if (txnsRaw.some((t) => t.id === id)) return;
     const savingCat = categories.find((c) => c.class === "SAVING");
     setData((d) => {
       if (d.txns.some((t) => t.id === id)) return d;
@@ -2734,7 +2799,7 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
         _m: Date.now()
       }] };
     });
-  }, [settings.monthlySavings, txns, data.deleted, categories, setData]);
+  }, [settings.monthlySavings, txnsRaw, data.deleted, categories, setData]);
   const dataMonths = useMemo(() => C.monthsWithData(income, txns), [income, txns]);
   const allMonths = useMemo(() => {
     const set = {};
