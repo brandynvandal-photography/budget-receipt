@@ -326,8 +326,6 @@ body{background:linear-gradient(180deg,#16413a 0px,#10302b 300px,#0a1614 680px) 
 .bankish .tile .t-cap{color:var(--muted);font-size:12.5px;margin-top:2px}
 .goal-eta{color:var(--muted)}
 .ask-title{font-size:26px;letter-spacing:-.02em;text-align:center}
-.ask-title .ask-stash{color:var(--accent)}
-.ask-title .ask-spend{color:var(--ink)}
 .buckets{display:flex;flex-wrap:wrap;gap:7px;margin:10px 0 2px;justify-content:center}
 .bucket{display:inline-flex;align-items:center;gap:5px;padding:7px 11px;border-radius:999px;
   border:1px solid var(--grid);background:transparent;color:var(--ink2);font-size:13.5px;
@@ -563,7 +561,6 @@ body{background:linear-gradient(180deg,#16413a 0px,#10302b 300px,#0a1614 680px) 
 .wm-stash.wm-win,.wm-spend.wm-win{color:var(--accent);animation:wm-pop .45s cubic-bezier(.34,1.56,.64,1)}
 .wm-stash.wm-dim,.wm-spend.wm-dim{color:var(--muted);opacity:.5}
 @keyframes wm-pop{0%{transform:scale(1)}42%{transform:scale(1.13)}100%{transform:scale(1)}}
-.ask-q{color:var(--ink);margin-left:-.07em}
 /* your-call coin flip (AMBER verdict) */
 .stage-wrap.coin{width:50px;height:50px}
 .anim-coin{position:absolute;left:0;top:0;will-change:transform;
@@ -631,6 +628,7 @@ body{background:linear-gradient(180deg,#16413a 0px,#10302b 300px,#0a1614 680px) 
   .val-pulse,.meter > i,.sheet,.sheet-bg,.fan-item,.tab-pane,.nc-bar,.anim-bill,.anim-card,.verdict,.pocket-brand svg,.anim-coin{animation:none}
   .ty,.wink{animation:none;opacity:1}
   .wm-stash,.wm-spend,.wm-or,.wm-q{animation:none;transform:none;opacity:1}
+  .wm-stash.wm-win,.wm-spend.wm-win{animation:none;transform:none}
   .swipe-cell .bubble{transition:none;transform:none;opacity:1}
   .jar-liq{transition:none}
 }
