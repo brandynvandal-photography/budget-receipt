@@ -1544,19 +1544,46 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
     }).catch(function () {});
   }
 
-  // A write can start failing after boot (quota exceeded, private mode). When
-  // it does we must fall over to the in-memory backend so that load() reads
-  // the same place save() writes. IndexedDB keeps working as the durable copy.
-  function degradeToMemory(data) {
+  // ---------- at-rest encryption (optional, tied to the app-lock PIN).
+  // When on, the persisted blob (localStorage + IndexedDB) is an AES-GCM
+  // envelope; `mem` stays plaintext (RAM only). The key is PBKDF2-derived from
+  // the PIN and held only in memory — never written down. Forgetting the PIN
+  // means the data is unrecoverable by design (Forgot PIN offers erase).
+  var subtle = (root.crypto && root.crypto.subtle) ? root.crypto.subtle : null;
+  var tenc = new TextEncoder(), tdec = new TextDecoder();
+  var cryptoKey = null, encSalt = null;
+  function b64(buf) { var b = new Uint8Array(buf), s = ""; for (var i = 0; i < b.length; i++) s += String.fromCharCode(b[i]); return btoa(s); }
+  function ub64(s) { var bin = atob(s), b = new Uint8Array(bin.length); for (var i = 0; i < bin.length; i++) b[i] = bin.charCodeAt(i); return b; }
+  function deriveAesKey(pin, salt) {
+    return subtle.importKey("raw", tenc.encode(pin), "PBKDF2", false, ["deriveKey"]).then(function (base) {
+      return subtle.deriveKey({ name: "PBKDF2", salt: salt, iterations: 21e4, hash: "SHA-256" }, base, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+    });
+  }
+  function encryptData(data) {
+    var iv = root.crypto.getRandomValues(new Uint8Array(12));
+    return subtle.encrypt({ name: "AES-GCM", iv: iv }, cryptoKey, tenc.encode(JSON.stringify(data))).then(function (ct) {
+      return { __enc: 1, kdf: "PBKDF2-SHA256-210k", salt: b64(encSalt), iv: b64(iv), ct: b64(ct) };
+    });
+  }
+
+  // A write can start failing after boot (quota exceeded, private mode). We
+  // fall over to memory; IndexedDB keeps working as the durable copy. `mem`
+  // already holds the plaintext, so this must not touch it.
+  function degradeToMemory() {
     backend = null;
-    mem = data;
     saveFailed = true;
     label = MEM_LABEL;
+  }
+  function persist(value) {
+    idbSet(value);                         // durable backup (ciphertext when encrypted)
+    if (!backend) return;
+    try { backend.setItem(KEY, JSON.stringify(value)); } catch (e) { degradeToMemory(); }
   }
   root.BudgetStorage = {
     get label() { return label; },
     get corrupted() { return corrupted; },
     get saveFailed() { return saveFailed; },
+    get encrypted() { return cryptoKey != null; },
     load: function () {
       return new Promise(function (resolve) {
         // 1) localStorage is authoritative when present (fast + always current)
@@ -1568,6 +1595,7 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
             try { parsed = JSON.parse(raw); }
             catch (e) { try { backend.setItem(KEY + ".bak", raw); } catch (e2) {} corrupted = true; }
             if (parsed !== void 0) {
+              if (parsed && parsed.__enc) { idbSet(parsed); return resolve(parsed); }  // encrypted → App decrypts
               mem = parsed;
               idbSet(parsed);              // keep the durable backup fresh
               return resolve(parsed);
@@ -1578,9 +1606,10 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
         //    from the IndexedDB backup, then restore the fast localStorage copy
         idbGet().then(function (fromIdb) {
           if (fromIdb != null) {
-            mem = fromIdb;
             corrupted = false;
             try { if (backend) backend.setItem(KEY, JSON.stringify(fromIdb)); } catch (e) {}
+            if (fromIdb && fromIdb.__enc) return resolve(fromIdb);
+            mem = fromIdb;
             return resolve(fromIdb);
           }
           resolve(mem);
@@ -1588,19 +1617,42 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
       });
     },
     save: function (data) {
-      // keep the latest in memory regardless, so a later read is never stale
+      // mem is always plaintext (RAM only); the persisted copy is ciphertext when on
       mem = data;
-      idbSet(data);                        // durable backup, async + best-effort
-      if (!backend) return;
-      try {
-        backend.setItem(KEY, JSON.stringify(data));
-      } catch (e) {
-        degradeToMemory(data);
-      }
+      if (cryptoKey) { encryptData(data).then(persist).catch(function () {}); }
+      else { persist(data); }
+    },
+    // unlock at boot: derive the key from the PIN + the stored envelope's salt
+    // and decrypt. Resolves the plaintext data, or null on a wrong PIN.
+    unlock: function (pin, env) {
+      if (!subtle || !env || !env.__enc) return Promise.resolve(null);
+      return deriveAesKey(pin, ub64(env.salt)).then(function (key) {
+        return subtle.decrypt({ name: "AES-GCM", iv: ub64(env.iv) }, key, ub64(env.ct)).then(function (pt) {
+          cryptoKey = key; encSalt = ub64(env.salt);
+          return JSON.parse(tdec.decode(pt));
+        });
+      }).catch(function () { return null; });
+    },
+    // turn encryption on: fresh key, and immediately persist current data as
+    // ciphertext (so a reload before the next save can't leave plaintext behind).
+    enableEncryption: function (pin, data) {
+      if (!subtle) return Promise.resolve(false);
+      var salt = root.crypto.getRandomValues(new Uint8Array(16));
+      return deriveAesKey(pin, salt).then(function (key) {
+        cryptoKey = key; encSalt = salt; mem = data;
+        return encryptData(data);
+      }).then(function (env) { persist(env); return true; });
+    },
+    // turn encryption off: drop the key, rewrite the store as plaintext.
+    disableEncryption: function (data) {
+      cryptoKey = null; encSalt = null; mem = data;
+      persist(data);
+      return Promise.resolve(true);
     },
     // right-to-erasure: remove the local copy AND the durable IndexedDB backup,
     // so nothing is recovered on next load. Returns a Promise.
     wipe: function () {
+      cryptoKey = null; encSalt = null;
       try { if (backend) { backend.removeItem(KEY); backend.removeItem(KEY + ".bak"); } } catch (e) {}
       mem = null;
       return idbOpen().then(function (db) {
@@ -3146,6 +3198,8 @@ class Boundary extends Component {
 }
 function App() {
   const [data, setDataRaw] = useState(null);
+  const [encEnv, setEncEnv] = useState(null);      // encrypted blob awaiting the PIN at boot
+  const [bootUnlocked, setBootUnlocked] = useState(false);
   const [tab, setTab] = useState("home");
   const [rev, setRev] = useState(0);
   const saveTimer = useRef(null);
@@ -3188,6 +3242,7 @@ function App() {
     let live = true;
     STORE.load().then((persisted) => {
       if (!live) return;
+      if (persisted && persisted.__enc) { setEncEnv(persisted); return; }   // locked: needs PIN to decrypt
       const isExisting = persisted && validShape(persisted);
       const d = isExisting ? applyMigrations(persisted) : freshData();
       // first run: existing installs are already past onboarding; only a
@@ -3224,12 +3279,28 @@ function App() {
       return next;
     });
   }, [runSync]);
+  if (encEnv) return /* @__PURE__ */ React.createElement(LockGate, {
+    sub: "Enter your PIN to unlock Stash.",
+    verify: async (pin) => {
+      const raw = await STORE.unlock(pin, encEnv);
+      if (!raw) return false;
+      const d = applyMigrations(raw);
+      dataRef.current = d;
+      setDataRaw(d);
+      setBootUnlocked(true);
+      setEncEnv(null);
+      runSync();
+      return true;
+    },
+    onForgot: () => { try { localStorage.removeItem("budget:sync:v1"); } catch (e) {} STORE.wipe().finally(() => location.reload()); }
+  });
   if (data === null) return /* @__PURE__ */ React.createElement("div", { className: "shell" }, /* @__PURE__ */ React.createElement("div", { className: "boot" }, "opening Stash\u2026"));
-  return /* @__PURE__ */ React.createElement(Main, { ...{ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, syncInfo, runSync } });
+  return /* @__PURE__ */ React.createElement(Main, { ...{ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, syncInfo, runSync, bootUnlocked } });
 }
-/* ---- App lock: a 6-digit PIN gate. The PIN is never stored — only a salted
-   PBKDF2-SHA256 verifier hash. This is a privacy gate (lost/borrowed phone);
-   the coming IndexedDB migration reuses this PIN to encrypt data at rest. ---- */
+/* ---- App lock: a 6-digit PIN. The PIN is never stored — only a salted
+   PBKDF2-SHA256 verifier hash (for the fast in-session re-lock). Turning the
+   lock on also encrypts the store at rest (BudgetStorage.enableEncryption):
+   the PIN derives an AES-GCM key, and the boot decrypt gate is the real lock. ---- */
 const PinLock = {
   b64(buf) { const b = new Uint8Array(buf); let s = ""; for (let i = 0; i < b.length; i++) s += String.fromCharCode(b[i]); return btoa(s); },
   unb64(s) { const bin = atob(s), b = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) b[i] = bin.charCodeAt(i); return b; },
@@ -3253,7 +3324,7 @@ const PinLock = {
   }
 };
 const LOCK_LEN = 6;
-function LockGate({ lockRec, onUnlock, onForgot }) {
+function LockGate({ lockRec, verify, onUnlock, onForgot, sub }) {
   const [pin, setPin] = useState("");
   const [err, setErr] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -3264,10 +3335,10 @@ function LockGate({ lockRec, onUnlock, onForgot }) {
     if (pin.length !== LOCK_LEN) return;
     let cancelled = false;
     setBusy(true);
-    PinLock.verify(pin, lockRec).then((ok) => {
+    Promise.resolve(verify ? verify(pin) : PinLock.verify(pin, lockRec)).then((ok) => {
       if (cancelled) return;
       setBusy(false);
-      if (ok) { buzz(8); onUnlock(); }
+      if (ok) { buzz(8); onUnlock && onUnlock(); }
       else { setErr(true); setPin(""); buzz([10, 40, 10]); setTimeout(() => setErr(false), 500); }
     });
     return () => { cancelled = true; };
@@ -3278,14 +3349,14 @@ function LockGate({ lockRec, onUnlock, onForgot }) {
   return /* @__PURE__ */ React.createElement("div", { className: "lockgate" },
     /* @__PURE__ */ React.createElement("div", { className: "lock-brand" }, /* @__PURE__ */ React.createElement(PocketMark, { size: 44 })),
     /* @__PURE__ */ React.createElement("div", { className: "lock-title" }, "Enter your PIN"),
-    /* @__PURE__ */ React.createElement("div", { className: "lock-sub" }, "Stash is locked to keep your money private."),
+    /* @__PURE__ */ React.createElement("div", { className: "lock-sub" }, sub || "Stash is locked to keep your money private."),
     /* @__PURE__ */ React.createElement("div", { className: "lock-dots" + (err ? " shake" : "") }, Array.from({ length: LOCK_LEN }).map((_, i) => /* @__PURE__ */ React.createElement("span", { key: i, className: "lock-dot" + (i < pin.length ? " on" : "") + (err ? " err" : "") }))),
     /* @__PURE__ */ React.createElement("div", { className: "lock-pad" }, keys.map((k, i) => k === "" ? /* @__PURE__ */ React.createElement("span", { key: i }) : /* @__PURE__ */ React.createElement("button", { key: i, className: "lock-key" + (k === "⌫" ? " ghost" : ""), onClick: k === "⌫" ? back : () => push(k), disabled: busy, "aria-label": k === "⌫" ? "Delete" : k }, k))),
     wipe
       ? /* @__PURE__ */ React.createElement("div", { className: "lock-forgot" }, /* @__PURE__ */ React.createElement("div", { className: "lock-warn" }, "Erase all data and start fresh? This can't be undone."), /* @__PURE__ */ React.createElement("div", { className: "lock-forgot-row" }, /* @__PURE__ */ React.createElement("button", { className: "btn quiet", onClick: () => setWipe(false) }, "Cancel"), /* @__PURE__ */ React.createElement("button", { className: "btn danger-quiet", onClick: onForgot }, "Erase everything")))
       : /* @__PURE__ */ React.createElement("button", { className: "lock-link", onClick: () => setWipe(true) }, "Forgot PIN?"));
 }
-function LockSetup({ settings, setSetting }) {
+function LockSetup({ settings, setSetting, data }) {
   const rec = settings.lock;
   const on = !!(rec && rec.enabled);
   const [mode, setMode] = useState(null);
@@ -3296,10 +3367,16 @@ function LockSetup({ settings, setSetting }) {
   const [busy, setBusy] = useState(false);
   const reset = () => { setMode(null); setCur(""); setP1(""); setP2(""); setMsg(""); };
   const okPin = (s) => /^\d{6}$/.test(s);
+  const withLock = (lock) => ({ ...data, settings: { ...(data.settings || {}), lock } });
   const enable = async () => {
     if (!okPin(p1)) return setMsg("Choose a 6-digit PIN.");
     if (p1 !== p2) return setMsg("Those PINs don't match.");
-    setBusy(true); const r = await PinLock.create(p1); setBusy(false);
+    setBusy(true);
+    const r = await PinLock.create(p1);
+    // encrypt the store at rest with this PIN — persist the encrypted copy
+    // (with the lock) immediately so a reload can't leave plaintext behind.
+    await STORE.enableEncryption(p1, withLock(r));
+    setBusy(false);
     setSetting("lock", r); reset();
   };
   const change = async () => {
@@ -3307,12 +3384,16 @@ function LockSetup({ settings, setSetting }) {
     if (!ok) return setMsg("Current PIN is wrong.");
     if (!okPin(p1)) return setMsg("New PIN must be 6 digits.");
     if (p1 !== p2) return setMsg("New PINs don't match.");
-    setBusy(true); const r = await PinLock.create(p1); setBusy(false);
-    setSetting("lock", { ...r, autoLockSec: rec.autoLockSec == null ? 30 : rec.autoLockSec }); reset();
+    setBusy(true);
+    const r = { ...(await PinLock.create(p1)), autoLockSec: rec.autoLockSec == null ? 30 : rec.autoLockSec };
+    await STORE.enableEncryption(p1, withLock(r));   // re-key the at-rest encryption
+    setBusy(false);
+    setSetting("lock", r); reset();
   };
   const disable = async () => {
     setBusy(true); const ok = await PinLock.verify(cur, rec); setBusy(false);
     if (!ok) return setMsg("Wrong PIN.");
+    await STORE.disableEncryption(withLock(null));   // rewrite store as plaintext
     setSetting("lock", null); reset();
   };
   const pinInput = (val, set, ph) => /* @__PURE__ */ React.createElement("input", { className: "lk-input", type: "password", inputMode: "numeric", autoComplete: "off", maxLength: 6, placeholder: ph, value: val, onChange: (e) => { set(e.target.value.replace(/\D/g, "")); setMsg(""); } });
@@ -3387,10 +3468,10 @@ function Onboarding({ settings, setSetting, setTab }) {
   }
   return /* @__PURE__ */ React.createElement("div", { className: "onboard" }, dots, body);
 }
-function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, syncInfo, runSync }) {
+function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, syncInfo, runSync, bootUnlocked }) {
   const { categories, settings, overrides, sinkingFunds } = data;
   const lockRec = settings.lock;
-  const [locked, setLocked] = useState(() => !!(lockRec && lockRec.enabled));
+  const [locked, setLocked] = useState(() => !bootUnlocked && !!(lockRec && lockRec.enabled));
   useEffect(() => {
     if (!(lockRec && lockRec.enabled)) return;
     let hiddenAt = null;
@@ -4149,7 +4230,7 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
       setView: setActView,
       openAdd: () => setSheetOpen(true)
     }
-  ), effTab === "trends" && /* @__PURE__ */ React.createElement(Trends, { ...shared, sfHist: data.sfHist || {} }), effTab === "funds" && /* @__PURE__ */ React.createElement(Funds, { ...shared }), effTab === "settings" && /* @__PURE__ */ React.createElement(Settings, { ...shared, simpleMode, ...{ setSetting, exportJSON, importJSON, resetSeed, syncCfg, setSyncCfg, syncInfo, runSync }, sfMap: data.sfMap || {}, setSfRole: (acct, role) => setData((d) => ({ ...d, sfMap: { ...d.sfMap || {}, [acct]: role } })) })), (effTab === "home" || effTab === "budget" || effTab === "activity") && /* @__PURE__ */ React.createElement(Fab, { openSheet: (k) => { setSheetKind(k); setSheetOpen(true); } }), sheetOpen &&/* @__PURE__ */ React.createElement(
+  ), effTab === "trends" && /* @__PURE__ */ React.createElement(Trends, { ...shared, sfHist: data.sfHist || {} }), effTab === "funds" && /* @__PURE__ */ React.createElement(Funds, { ...shared }), effTab === "settings" && /* @__PURE__ */ React.createElement(Settings, { ...shared, simpleMode, data, ...{ setSetting, exportJSON, importJSON, resetSeed, syncCfg, setSyncCfg, syncInfo, runSync }, sfMap: data.sfMap || {}, setSfRole: (acct, role) => setData((d) => ({ ...d, sfMap: { ...d.sfMap || {}, [acct]: role } })) })), (effTab === "home" || effTab === "budget" || effTab === "activity") && /* @__PURE__ */ React.createElement(Fab, { openSheet: (k) => { setSheetKind(k); setSheetOpen(true); } }), sheetOpen &&/* @__PURE__ */ React.createElement(
     AddSheet,
     {
       ...{ month, addTxn, addIncome, addBatch, categories, merchantMap },
@@ -5025,6 +5106,7 @@ function Settings(p) {
     settings,
     baseline,
     setSetting,
+    data,
     exportJSON,
     importJSON,
     resetSeed,
@@ -5275,7 +5357,7 @@ function Settings(p) {
     },
     /* @__PURE__ */ React.createElement("div", { className: "btn-row", style: { marginTop: 0 } }, /* @__PURE__ */ React.createElement("button", { className: "btn quiet", onClick: runCheck }, "Run self-check")),
     check && /* @__PURE__ */ React.createElement("div", { className: "selfcheck" }, check.fail === 0 ? /* @__PURE__ */ React.createElement("span", { className: "tag ok" }, "\u2713 all ", check.pass, " checks passed") : /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("span", { className: "tag over" }, "\u2715 ", check.fail, " failed"), /* @__PURE__ */ React.createElement("div", { className: "fails" }, check.log.filter((l) => l[0] === "fail").map((l) => l[1]).join("\n"))))
-  ), /* @__PURE__ */ React.createElement(Acc, { title: "App lock", cap: settings.lock && settings.lock.enabled ? "On · 6-digit PIN" : "Off" }, /* @__PURE__ */ React.createElement(LockSetup, { settings, setSetting })), /* @__PURE__ */ React.createElement(Acc, { title: "About" }, /* @__PURE__ */ React.createElement("div", { className: "sub", style: { marginTop: 0 } }, "Stash is a decision-support tool, not licensed financial advice. Money is stored as exact cents; totals are always recomputed from your transactions, never stored."))), (STORE.corrupted || STORE.saveFailed) && /* @__PURE__ */ React.createElement("div", { className: "footnote" }, STORE.corrupted ? "\u26A0 previous save was unreadable \u2014 a backup copy was kept" : "\u26A0 saving to this browser failed \u2014 use Export to keep your data"));
+  ), /* @__PURE__ */ React.createElement(Acc, { title: "App lock", cap: settings.lock && settings.lock.enabled ? "On · 6-digit PIN" : "Off" }, /* @__PURE__ */ React.createElement(LockSetup, { settings, setSetting, data })), /* @__PURE__ */ React.createElement(Acc, { title: "About" }, /* @__PURE__ */ React.createElement("div", { className: "sub", style: { marginTop: 0 } }, "Stash is a decision-support tool, not licensed financial advice. Money is stored as exact cents; totals are always recomputed from your transactions, never stored."))), (STORE.corrupted || STORE.saveFailed) && /* @__PURE__ */ React.createElement("div", { className: "footnote" }, STORE.corrupted ? "\u26A0 previous save was unreadable \u2014 a backup copy was kept" : "\u26A0 saving to this browser failed \u2014 use Export to keep your data"));
 }
 ReactDOM.createRoot(document.getElementById("root")).render(
   /* @__PURE__ */ React.createElement(Boundary, null, /* @__PURE__ */ React.createElement(App, null))
