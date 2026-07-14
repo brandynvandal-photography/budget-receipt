@@ -2404,25 +2404,9 @@ const MIGRATIONS = [
     data.schemaVersion = 7;
   },
   function v7_to_v8(data) {
-    // bank-truth cleanup: once accounts are connected, manually entered
-    // txns/income yield to sync data. Tombstoned so sync can't resurrect.
-    if (data.sfMap && Object.keys(data.sfMap).length) {
-      const manual = (x) => {
-        const id = String(x && x.id || "");
-        return id && !id.startsWith("sf-") && !id.startsWith("rec");
-      };
-      const del = data.deleted = data.deleted || { txns: [], income: [] };
-      data.txns = (data.txns || []).filter((t) => {
-        if (manual(t)) { del.txns.push(t.id); return false; }
-        return true;
-      });
-      data.income = (data.income || []).filter((e) => {
-        if (manual(e)) { del.income.push(e.id); return false; }
-        return true;
-      });
-      del.txns = del.txns.slice(-1e3);
-      del.income = del.income.slice(-1e3);
-    }
+    // both truths coexist: manually entered data and sync data are BOTH
+    // kept — neither wipes the other (this supersedes the earlier bank-truth
+    // wipe, which is intentionally gone).
     data.schemaVersion = 8;
   }
 ];
@@ -3302,7 +3286,11 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
       const delta = hist[day].bank - hist[prev].bank;
       const dayInfo = byDay[day] || { merch: [], inflow: 0 };
       if (delta < 0) {
-        const spendC = Math.max(0, -delta - dayInfo.inflow);
+        // both truths: whatever you've already logged that day (manual
+        // entries, imported rows, materialized bills) explains part of the
+        // balance drop — derived spending fills ONLY the remainder
+        const explained = txnsRaw.reduce((s, t) => !t.isTransfer && t.date === day && !String(t.id).startsWith("sf-d-") ? s + t.amount : s, 0);
+        const spendC = Math.max(0, -delta - dayInfo.inflow - explained);
         if (!spendC) continue;
         if (dayInfo.merch.length) {
           const per = Math.floor(spendC / dayInfo.merch.length);
@@ -3402,8 +3390,10 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
   const anchor = settings.bankAnchor;
   const availableNow = useMemo(() => {
     if (!anchor) return null;
-    // bank-truth: In the bank IS the last synced Chime balance — no local math
-    if (bankTruth) return anchor.cents;
+    // both truths: start from the synced Chime balance, then adjust by the
+    // manual entries you've logged SINCE that sync. The next daily sync
+    // resets the anchor (newer _ts), so those entries stop adjusting once
+    // they're baked into the real balance — no drift, no double-count.
     // rec* (plan entries) and sf-* (bank-imported rows) never adjust the
     // anchor: the first are plans, the second are already IN the balance
     const affects = (x) => !String(x.id || "").startsWith("rec") && !String(x.id || "").startsWith("sf-") && ((x._m || 0) > (anchor._ts || 0) || x.date > anchor.asOf);
