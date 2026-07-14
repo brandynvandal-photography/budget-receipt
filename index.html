@@ -522,7 +522,7 @@ body{background:linear-gradient(180deg,#16413a 0px,#10302b 300px,#0a1614 680px) 
 /* tagline types on, then winks; pocket flies in */
 .ty{opacity:0;animation:ty-in .3s ease both}
 @keyframes ty-in{to{opacity:1}}
-.wink{opacity:0;display:inline-block;transform-origin:center;
+.wink{opacity:0;display:inline-block;transform-origin:center;margin-left:.4em;
   animation:ty-in .25s ease both, wink-squish .5s ease both}
 @keyframes wink-squish{0%,100%{transform:scaleY(1)}50%{transform:scaleY(.15)}}
 .pocket-brand svg{animation:pocket-in .55s cubic-bezier(.34,1.56,.64,1) both}
@@ -4814,7 +4814,7 @@ function Settings(p) {
     },
     /* @__PURE__ */ React.createElement("div", { className: "btn-row", style: { marginTop: 0 } }, /* @__PURE__ */ React.createElement("button", { className: "btn quiet", onClick: runCheck }, "Run self-check")),
     check && /* @__PURE__ */ React.createElement("div", { className: "selfcheck" }, check.fail === 0 ? /* @__PURE__ */ React.createElement("span", { className: "tag ok" }, "\u2713 all ", check.pass, " checks passed") : /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("span", { className: "tag over" }, "\u2715 ", check.fail, " failed"), /* @__PURE__ */ React.createElement("div", { className: "fails" }, check.log.filter((l) => l[0] === "fail").map((l) => l[1]).join("\n"))))
-  ), /* @__PURE__ */ React.createElement(Acc, { title: "About" }, /* @__PURE__ */ React.createElement("div", { className: "sub", style: { marginTop: 0 } }, "Stash is a decision-support tool, not licensed financial advice. Money is stored as exact cents; totals are always recomputed from your transactions, never stored."))), /* @__PURE__ */ React.createElement("div", { className: "footnote" }, "local-first \xB7 exact cents \xB7 totals derived, never stored \xB7 ", STORE.label, STORE.corrupted ? " \xB7 \u26A0 previous save was unreadable \u2014 a backup copy was kept" : ""));
+  ), /* @__PURE__ */ React.createElement(Acc, { title: "About" }, /* @__PURE__ */ React.createElement("div", { className: "sub", style: { marginTop: 0 } }, "Stash is a decision-support tool, not licensed financial advice. Money is stored as exact cents; totals are always recomputed from your transactions, never stored."))), (STORE.corrupted || STORE.saveFailed) && /* @__PURE__ */ React.createElement("div", { className: "footnote" }, STORE.corrupted ? "\u26A0 previous save was unreadable \u2014 a backup copy was kept" : "\u26A0 saving to this browser failed \u2014 use Export to keep your data"));
 }
 ReactDOM.createRoot(document.getElementById("root")).render(
   /* @__PURE__ */ React.createElement(Boundary, null, /* @__PURE__ */ React.createElement(App, null))
