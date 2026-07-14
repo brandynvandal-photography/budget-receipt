@@ -663,6 +663,28 @@ body{background:linear-gradient(180deg,#16413a 0px,#10302b 300px,#0a1614 680px) 
 .lock-row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:10px;font-size:14px;color:var(--ink)}
 .lock-row select{border:1px solid var(--ring);border-radius:9px;padding:8px 10px;background:var(--page);color:var(--ink);font-size:14px}
 @media (prefers-reduced-motion:reduce){.lock-dots.shake{animation:none}.lock-key:active{transform:none}}
+.onboard{position:fixed;inset:0;z-index:9500;background:var(--page);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;padding:44px 24px calc(32px + env(safe-area-inset-bottom,0px));overflow-y:auto}
+.ob-dots{display:flex;gap:8px}
+.ob-dot{width:7px;height:7px;border-radius:50%;background:var(--ring);transition:width .2s,background .2s}
+.ob-dot.on{width:22px;border-radius:4px;background:var(--accent)}
+.ob-card{width:100%;max-width:400px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:14px}
+.ob-jar{margin-bottom:2px}
+.ob-check{width:52px;height:52px;border-radius:50%;background:var(--accent);color:#08130f;display:grid;place-items:center;font-size:28px;font-weight:800}
+.ob-eyebrow{font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--accent)}
+.ob-h{font-size:26px;font-weight:800;letter-spacing:-.02em;color:var(--ink);line-height:1.12;margin:0;text-wrap:balance}
+.ob-p{font-size:14.5px;color:var(--muted);line-height:1.5;margin:0;max-width:34ch}
+.ob-ul{list-style:none;padding:0;margin:4px 0;display:flex;flex-direction:column;gap:12px;text-align:left;width:100%;max-width:34ch}
+.ob-ul li{font-size:14.5px;color:var(--ink);padding-left:26px;position:relative;line-height:1.4}
+.ob-ul li::before{content:"✓";position:absolute;left:0;top:0;color:var(--accent);font-weight:800}
+.ob-fields{display:flex;flex-direction:column;gap:16px;width:100%;max-width:34ch;text-align:left;margin:4px 0}
+.ob-field label{display:block;font-size:13.5px;font-weight:600;color:var(--ink);margin-bottom:7px}
+.ob-field .f-sub{display:block;font-size:12px;color:var(--muted);font-weight:400;margin-top:3px}
+.ob-field input,.ob-field select{width:100%;border:1px solid var(--ring);border-radius:10px;padding:12px;background:var(--page);color:var(--ink);font-size:15px}
+.ob-note{display:flex;flex-direction:column;gap:11px;width:100%;max-width:34ch;text-align:left}
+.ob-note div{font-size:14px;color:var(--ink);line-height:1.45}
+.ob-actions{display:flex;flex-direction:column;gap:9px;width:100%;max-width:34ch;margin-top:6px}
+.ob-actions .btn{width:100%;justify-content:center}
+.ob-back{background:none;border:none;color:var(--muted);font-size:13px;cursor:pointer;padding:4px}
 </style>
 </head>
 <body>
@@ -3084,7 +3106,11 @@ function App() {
     let live = true;
     STORE.load().then((persisted) => {
       if (!live) return;
-      const d = persisted && validShape(persisted) ? applyMigrations(persisted) : freshData();
+      const isExisting = persisted && validShape(persisted);
+      const d = isExisting ? applyMigrations(persisted) : freshData();
+      // first run: existing installs are already past onboarding; only a
+      // brand-new (freshData) install sees the welcome flow.
+      if (isExisting && d.settings && d.settings.onboarded == null) d.settings.onboarded = true;
       dataRef.current = d;
       setDataRaw(d);
       runSync();
@@ -3220,6 +3246,64 @@ function LockSetup({ settings, setSetting }) {
     /* @__PURE__ */ React.createElement("div", { className: "sub", style: { marginTop: 0 } }, "✓ App lock is on — Stash asks for your PIN when you come back."),
     /* @__PURE__ */ React.createElement("div", { className: "lock-row" }, /* @__PURE__ */ React.createElement("span", null, "Auto-lock"), /* @__PURE__ */ React.createElement("select", { value: rec.autoLockSec == null ? 30 : rec.autoLockSec, onChange: (e) => setSetting("lock", { ...rec, autoLockSec: +e.target.value }) }, /* @__PURE__ */ React.createElement("option", { value: 0 }, "Immediately"), /* @__PURE__ */ React.createElement("option", { value: 30 }, "After 30s away"), /* @__PURE__ */ React.createElement("option", { value: 60 }, "After 1 min"), /* @__PURE__ */ React.createElement("option", { value: 300 }, "After 5 min"))),
     /* @__PURE__ */ React.createElement("div", { className: "btn-row", style: { marginTop: 12 } }, /* @__PURE__ */ React.createElement("button", { className: "btn quiet", onClick: () => setMode("change") }, "Change PIN"), /* @__PURE__ */ React.createElement("button", { className: "btn danger-quiet", onClick: () => setMode("off") }, "Turn off")));
+}
+/* ---- First run: a short, honest welcome. Includes a notice-at-collection
+   (privacy) step and the two settings that make the decider useful. Only a
+   brand-new install sees it. ---- */
+function Onboarding({ settings, setSetting, setTab }) {
+  const [step, setStep] = useState(0);
+  const [floor, setFloor] = useState(settings.balanceFloor ? (settings.balanceFloor / 100).toFixed(0) : "");
+  const pay0 = settings.paycheck || {};
+  const [payDate, setPayDate] = useState(pay0.payDate || "");
+  const [sched, setSched] = useState(pay0.schedule || "biweekly");
+  const N = 4;
+  const finish = (goSettings) => {
+    const c = C.parseDollars(floor);
+    if (c != null && c >= 0) setSetting("balanceFloor", c);
+    if (payDate) setSetting("paycheck", { ...(settings.paycheck || {}), payDate, schedule: sched });
+    setSetting("onboarded", true);
+    if (goSettings) setTab("settings");
+  };
+  const dots = /* @__PURE__ */ React.createElement("div", { className: "ob-dots" }, Array.from({ length: N }).map((_, i) => /* @__PURE__ */ React.createElement("span", { key: i, className: "ob-dot" + (i === step ? " on" : "") })));
+  const back = step > 0 ? /* @__PURE__ */ React.createElement("button", { className: "ob-back", onClick: () => setStep(step - 1) }, "Back") : null;
+  let body;
+  if (step === 0) {
+    body = /* @__PURE__ */ React.createElement("div", { className: "ob-card" },
+      /* @__PURE__ */ React.createElement("div", { className: "ob-jar" }, /* @__PURE__ */ React.createElement(PocketMark, { size: 52 })),
+      /* @__PURE__ */ React.createElement("h1", { className: "ob-h" }, "Welcome to Stash"),
+      /* @__PURE__ */ React.createElement("p", { className: "ob-p" }, "Stash answers one question — stash it, or spend it? — from what's really in your bank, not a guess."),
+      /* @__PURE__ */ React.createElement("div", { className: "ob-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: () => setStep(1) }, "Get started")));
+  } else if (step === 1) {
+    body = /* @__PURE__ */ React.createElement("div", { className: "ob-card" },
+      /* @__PURE__ */ React.createElement("div", { className: "ob-eyebrow" }, "Your privacy"),
+      /* @__PURE__ */ React.createElement("h1", { className: "ob-h" }, "Your money stays yours"),
+      /* @__PURE__ */ React.createElement("ul", { className: "ob-ul" },
+        /* @__PURE__ */ React.createElement("li", null, "Your data lives on your device — not on our servers."),
+        /* @__PURE__ */ React.createElement("li", null, "Backups are end-to-end encrypted. We can't read them."),
+        /* @__PURE__ */ React.createElement("li", null, "Nothing is sold or shared. Export or erase it all, anytime."),
+        /* @__PURE__ */ React.createElement("li", null, "Stash is a decision tool — not licensed financial advice.")),
+      /* @__PURE__ */ React.createElement("div", { className: "ob-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: () => setStep(2) }, "I understand"), back));
+  } else if (step === 2) {
+    body = /* @__PURE__ */ React.createElement("div", { className: "ob-card" },
+      /* @__PURE__ */ React.createElement("h1", { className: "ob-h" }, "Two quick basics"),
+      /* @__PURE__ */ React.createElement("p", { className: "ob-p" }, "Both optional — change them anytime in Settings."),
+      /* @__PURE__ */ React.createElement("div", { className: "ob-fields" },
+        /* @__PURE__ */ React.createElement("div", { className: "ob-field" }, /* @__PURE__ */ React.createElement("label", null, "Never let my bank drop below", /* @__PURE__ */ React.createElement("span", { className: "f-sub" }, "We'll warn you before a buy crosses it.")), /* @__PURE__ */ React.createElement("input", { type: "number", inputMode: "decimal", placeholder: "$  e.g. 200", value: floor, onChange: (e) => setFloor(e.target.value) })),
+        /* @__PURE__ */ React.createElement("div", { className: "ob-field" }, /* @__PURE__ */ React.createElement("label", null, "Next payday", /* @__PURE__ */ React.createElement("span", { className: "f-sub" }, "Powers “days until payday” on Home.")), /* @__PURE__ */ React.createElement("input", { type: "date", value: payDate, onChange: (e) => setPayDate(e.target.value) }), /* @__PURE__ */ React.createElement("select", { value: sched, onChange: (e) => setSched(e.target.value), style: { marginTop: 8 } }, /* @__PURE__ */ React.createElement("option", { value: "weekly" }, "Weekly"), /* @__PURE__ */ React.createElement("option", { value: "biweekly" }, "Every 2 weeks"), /* @__PURE__ */ React.createElement("option", { value: "semimonthly" }, "Twice a month"), /* @__PURE__ */ React.createElement("option", { value: "monthly" }, "Monthly")))),
+      /* @__PURE__ */ React.createElement("div", { className: "ob-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: () => setStep(3) }, "Continue"), back));
+  } else {
+    body = /* @__PURE__ */ React.createElement("div", { className: "ob-card" },
+      /* @__PURE__ */ React.createElement("div", { className: "ob-check" }, "✓"),
+      /* @__PURE__ */ React.createElement("h1", { className: "ob-h" }, "You're all set"),
+      /* @__PURE__ */ React.createElement("p", { className: "ob-p" }, "When you're ready, finish these in Settings:"),
+      /* @__PURE__ */ React.createElement("div", { className: "ob-note" },
+        /* @__PURE__ */ React.createElement("div", null, "🔒  Turn on a PIN lock to keep balances private."),
+        /* @__PURE__ */ React.createElement("div", null, "🏦  Connect Chime + Fidelity so spending tracks itself.")),
+      /* @__PURE__ */ React.createElement("div", { className: "ob-actions" },
+        /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: () => finish(false) }, "Start using Stash"),
+        /* @__PURE__ */ React.createElement("button", { className: "btn quiet", onClick: () => finish(true) }, "Set these up in Settings"), back));
+  }
+  return /* @__PURE__ */ React.createElement("div", { className: "onboard" }, dots, body);
 }
 function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, syncInfo, runSync }) {
   const { categories, settings, overrides, sinkingFunds } = data;
@@ -3972,6 +4056,7 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
   ];
   const effTab = simpleMode && (tab === "budget" || tab === "funds") ? "home" : tab;
   if (locked && lockRec && lockRec.enabled) return /* @__PURE__ */ React.createElement(LockGate, { lockRec, onUnlock: () => setLocked(false), onForgot: () => { try { localStorage.removeItem("budget:v2:data"); localStorage.removeItem("budget:sync:v1"); } catch (e) {} location.reload(); } });
+  if (!settings.onboarded) return /* @__PURE__ */ React.createElement(Onboarding, { settings, setSetting, setTab });
   return /* @__PURE__ */ React.createElement("div", { className: "shell" }, /* @__PURE__ */ React.createElement("header", { className: "top" }, /* @__PURE__ */ React.createElement(LogoMark, null)), month !== CURRENT_MONTH && effTab !== "home" && /* @__PURE__ */ React.createElement("button", { className: "backnow", onClick: () => setMonth(CURRENT_MONTH) }, "Viewing ", monthLabel(month), " \xB7 back to ", monthLabel(CURRENT_MONTH), " \u2192"), /* @__PURE__ */ React.createElement("div", { key: effTab, className: "tab-pane" }, effTab === "home" && (simpleMode ? /* @__PURE__ */ React.createElement(SimpleHome, { ...shared, ...{ setSetting, addTxn, addIncome, openAdd: (init) => { setSheetInit(init); setSheetKind("spend"); setSheetOpen(true); } } }) : /* @__PURE__ */ React.createElement(Home, { ...shared })), effTab === "budget" && /* @__PURE__ */ React.createElement(Budget, { ...shared }), effTab === "activity" && /* @__PURE__ */ React.createElement(
     Activity,
     {
