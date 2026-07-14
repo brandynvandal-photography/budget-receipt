@@ -1595,6 +1595,24 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
         degradeToMemory(data);
       }
     },
+    // right-to-erasure: remove the local copy AND the durable IndexedDB backup,
+    // so nothing is recovered on next load. Returns a Promise.
+    wipe: function () {
+      try { if (backend) { backend.removeItem(KEY); backend.removeItem(KEY + ".bak"); } } catch (e) {}
+      mem = null;
+      return idbOpen().then(function (db) {
+        if (!db) return;
+        return new Promise(function (resolve) {
+          try {
+            var tx = db.transaction(IDB_STORE, "readwrite");
+            tx.objectStore(IDB_STORE).delete(IDB_KEY);
+            tx.oncomplete = function () { resolve(); };
+            tx.onerror = function () { resolve(); };
+            tx.onabort = function () { resolve(); };
+          } catch (e) { resolve(); }
+        });
+      }).catch(function () {});
+    },
   };
 })(typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : this));
 
@@ -4116,7 +4134,7 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     ["settings", "Settings", "\u2699"]
   ];
   const effTab = simpleMode && (tab === "budget" || tab === "funds") ? "home" : tab;
-  if (locked && lockRec && lockRec.enabled) return /* @__PURE__ */ React.createElement(LockGate, { lockRec, onUnlock: () => setLocked(false), onForgot: () => { try { localStorage.removeItem("budget:v2:data"); localStorage.removeItem("budget:sync:v1"); } catch (e) {} location.reload(); } });
+  if (locked && lockRec && lockRec.enabled) return /* @__PURE__ */ React.createElement(LockGate, { lockRec, onUnlock: () => setLocked(false), onForgot: () => { try { localStorage.removeItem("budget:sync:v1"); } catch (e) {} STORE.wipe().finally(() => location.reload()); } });
   if (!settings.onboarded) return /* @__PURE__ */ React.createElement(Onboarding, { settings, setSetting, setTab });
   return /* @__PURE__ */ React.createElement("div", { className: "shell" }, /* @__PURE__ */ React.createElement("header", { className: "top" }, /* @__PURE__ */ React.createElement(LogoMark, null)), month !== CURRENT_MONTH && effTab !== "home" && /* @__PURE__ */ React.createElement("button", { className: "backnow", onClick: () => setMonth(CURRENT_MONTH) }, "Viewing ", monthLabel(month), " \xB7 back to ", monthLabel(CURRENT_MONTH), " \u2192"), /* @__PURE__ */ React.createElement("div", { key: effTab, className: "tab-pane" }, effTab === "home" && (simpleMode ? /* @__PURE__ */ React.createElement(SimpleHome, { ...shared, ...{ setSetting, addTxn, addIncome, openAdd: (init) => { setSheetInit(init); setSheetKind("spend"); setSheetOpen(true); } } }) : /* @__PURE__ */ React.createElement(Home, { ...shared })), effTab === "budget" && /* @__PURE__ */ React.createElement(Budget, { ...shared }), effTab === "activity" && /* @__PURE__ */ React.createElement(
     Activity,
