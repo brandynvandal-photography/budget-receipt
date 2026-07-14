@@ -1,7 +1,10 @@
 {
+  "id": "./",
   "name": "Stash — Budget",
   "short_name": "Stash",
   "description": "Stash or spend? A calm, bank-truth budgeting decider.",
+  "lang": "en-US",
+  "dir": "ltr",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
