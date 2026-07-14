@@ -569,6 +569,9 @@ body{background:linear-gradient(180deg,#16413a 0px,#10302b 300px,#0a1614 680px) 
   25%{opacity:1}
   55%{transform:translateY(-16px) scale(1.08) rotate(380deg)}
   100%{transform:translateY(0) scale(1) rotate(720deg);opacity:1}}
+.til-pay{font-size:13px;color:var(--ink2);text-align:center;margin:8px 0 2px}
+.til-pay b{color:var(--ink);font-weight:700}
+.til-day{color:var(--muted)}
 .ask-help{font-size:13px;color:var(--ink2);text-align:left;background:rgba(255,255,255,.04);
   border:1px solid var(--grid);border-radius:12px;padding:10px 12px;margin:10px 0 2px;line-height:1.5}
 .ask-title{position:relative}
@@ -1090,6 +1093,37 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
     }
     return m;
   }
+  // next payday ISO on/after today, stepping from an anchor payday by the
+  // pay schedule. weekly/biweekly step by days; semimonthly ~ every 15 days;
+  // monthly keeps the anchor day-of-month. Returns null if no anchor.
+  function nextPayday(anchorISO, schedule, todayISO) {
+    if (!anchorISO) return null;
+    var oneDay = 86400000;
+    var today = new Date(todayISO + "T00:00:00");
+    var anchor = new Date(anchorISO + "T00:00:00");
+    function iso(d) {
+      var p = function (n) { return (n < 10 ? "0" : "") + n; };
+      return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate());
+    }
+    if (schedule === "monthly") {
+      var day = anchor.getDate();
+      var c = new Date(today.getFullYear(), today.getMonth(), day);
+      if (c < today) c = new Date(today.getFullYear(), today.getMonth() + 1, day);
+      return iso(c);
+    }
+    var step = schedule === "weekly" ? 7 : schedule === "semimonthly" ? 15 : 14;
+    var diffDays = Math.floor((today - anchor) / oneDay);
+    var cycles = Math.floor(diffDays / step);
+    var next = new Date(anchor.getTime() + cycles * step * oneDay);
+    while (next < today) next = new Date(next.getTime() + step * oneDay);
+    return iso(next);
+  }
+  // whole days from today to an ISO date (0 if today or past)
+  function daysUntil(iso, todayISO) {
+    if (!iso) return null;
+    var d = Math.round((new Date(iso + "T00:00:00") - new Date(todayISO + "T00:00:00")) / 86400000);
+    return Math.max(0, d);
+  }
 
   /* ---------- §5.6 month-end projector (pace) ---------- */
   // guards daysElapsed == 0 (§5.6/§8)
@@ -1274,7 +1308,11 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
       bank: x.bank != null ? x.bank : null, bankAfter: null, netAfter: null, runwayAfter: null, perDayAfter: null };
     var done = function (v, r) { out.verdict = v; out.reason = r; return out; };
     var paceTip = projAfter != null && projectedEnd >= 0 && projAfter < 0;
-    var bankShort = x.bank != null && amount > x.bank;
+    // user-set balance floor: never let the bank drop below it (0 = the
+    // literal empty-account floor)
+    var floor = x.floor > 0 ? x.floor : 0;
+    if (x.bank != null) out.bankAfter = x.bank - amount;
+    var bankShort = x.bank != null && (x.bank - amount) < floor;
     var isEmergency = L >= 3;
     // §emergency: the this-month lens is the wrong lens. When the month (or
     // the bank) can't cover it, route to the safety net instead of blocking.
@@ -1356,6 +1394,7 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
     trailingAverage: trailingAverage, trailingMin: trailingMin, baselineIncome: baselineIncome,
     coreMonthlyBurn: coreMonthlyBurn, runwayMonths: runwayMonths,
     spendBurn: spendBurn, safetyNetMonths: safetyNetMonths,
+    nextPayday: nextPayday, daysUntil: daysUntil,
     projectSpend: projectSpend, isDeficit: isDeficit, monthIsRed: monthIsRed,
     splitPool: splitPool, allocate: allocate,
     monthlySetAside: monthlySetAside, monthsUntilFunded: monthsUntilFunded,
@@ -2303,6 +2342,21 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
     ok("a bigger goal reads stricter below target",
       C.safetyNetMonths(C.c(4000), C.c(2000), C.c(2500), 6) < C.safetyNetMonths(C.c(4000), C.c(2000), C.c(2500), 1));
 
+    /* payday: next check on/after today, days until */
+    eq("biweekly payday steps to the next cycle",
+      C.nextPayday("2026-07-03", "biweekly", "2026-07-14"), "2026-07-17");
+    eq("payday today counts as today",
+      C.nextPayday("2026-07-14", "weekly", "2026-07-14"), "2026-07-14");
+    eq("monthly payday keeps the day-of-month",
+      C.nextPayday("2026-06-25", "monthly", "2026-07-14"), "2026-07-25");
+    eq("days until a future payday", C.daysUntil("2026-07-17", "2026-07-14"), 3);
+    eq("days until floors at zero for past dates", C.daysUntil("2026-07-01", "2026-07-14"), 0);
+    /* balance floor: purchase that dips under the floor is RED/bank */
+    eq("dropping under the balance floor => RED/bank",
+      C.simpleVerdict(C.c(300), C.c(2000), C.c(1500), C.c(40), 1, { bank: C.c(500), floor: C.c(250) }).reason, "bank");
+    ok("staying above the floor is fine",
+      C.simpleVerdict(C.c(100), C.c(2000), C.c(1500), C.c(40), 1, { bank: C.c(500), floor: C.c(250) }).reason !== "bank");
+
     eq("projector guards daysElapsed==0", C.projectSpend(50000, 0, 30), 0);
     eq("projector pace correct", C.projectSpend(30000, 10, 30), 90000);
 
@@ -3115,11 +3169,17 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
   const [sfBal, setSfBal] = useState(null);
   const [actView, setActView] = useState("spend");
   const [undoItem, setUndoItem] = useState(null);
+  const [bulkPrompt, setBulkPrompt] = useState(null);
   useEffect(() => {
     if (!undoItem) return;
     const t = setTimeout(() => setUndoItem(null), 5000);
     return () => clearTimeout(t);
   }, [undoItem]);
+  useEffect(() => {
+    if (!bulkPrompt) return;
+    const t = setTimeout(() => setBulkPrompt(null), 6000);
+    return () => clearTimeout(t);
+  }, [bulkPrompt]);
   useEffect(() => {
     const amt = settings.monthlyIncome || 0;
     if (amt <= 0 || bankTruth) return;
@@ -3571,7 +3631,7 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
   const deleteTxn = (txnId) => {
     const entry = txns.find((t) => t.id === txnId) || txnsRaw.find((t) => t.id === txnId);
     const tomb = stone(txnId);
-    if (entry) setUndoItem({ kind: "txn", entry, tomb, label: entry.merchant || "Entry" });
+    if (entry) { setBulkPrompt(null); setUndoItem({ kind: "txn", entry, tomb, label: entry.merchant || "Entry" }); }
     setData((d) => ({
       ...d,
       txns: d.txns.filter((t) => t.id !== txnId),
@@ -3584,7 +3644,7 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
   const deleteIncome = (incId) => {
     const entry = income.find((e) => e.id === incId) || incomeRaw.find((e) => e.id === incId);
     const tomb = stone(incId);
-    if (entry) setUndoItem({ kind: "income", entry, tomb, label: entry.source || "Deposit" });
+    if (entry) { setBulkPrompt(null); setUndoItem({ kind: "income", entry, tomb, label: entry.source || "Deposit" }); }
     setData((d) => ({
       ...d,
       income: d.income.filter((e) => e.id !== incId),
@@ -3608,14 +3668,27 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
       return { ...d, txns: [...d.txns, u.entry], deleted: { txns: (del.txns || []).filter((x) => x !== u.tomb), income: del.income || [] } };
     });
   };
-  const recategorize = (txnId, catId) => setData((d) => {
-    const txn = d.txns.find((t) => t.id === txnId);
-    return {
+  const recategorize = (txnId, catId) => {
+    const txn = txns.find((t) => t.id === txnId) || txnsRaw.find((t) => t.id === txnId);
+    const merchant = txn ? txn.merchant || "" : "";
+    setData((d) => ({
       ...d,
-      merchantMap: txn ? learn({ ...d.merchantMap || {} }, txn.merchant, catId) : d.merchantMap,
+      merchantMap: txn ? learn({ ...d.merchantMap || {} }, merchant, catId) : d.merchantMap,
       txns: d.txns.map((t) => t.id === txnId ? { ...t, categoryId: catId || null, _m: Date.now() } : t)
-    };
-  });
+    }));
+    // offer to apply this category to the merchant's other transactions
+    if (merchant && catId) {
+      const others = txns.filter((t) => t.id !== txnId && (t.merchant || "") === merchant && t.categoryId !== catId && !t.isTransfer);
+      setUndoItem(null);
+      setBulkPrompt(others.length ? { merchant, catId, count: others.length } : null);
+    }
+  };
+  const applyBulk = () => {
+    const b = bulkPrompt;
+    setBulkPrompt(null);
+    if (!b) return;
+    setData((d) => ({ ...d, txns: d.txns.map((t) => (t.merchant || "") === b.merchant && t.categoryId !== b.catId && !t.isTransfer ? { ...t, categoryId: b.catId, _m: Date.now() } : t) }));
+  };
   const setSetting = (key, val) => setData((d) => ({
     ...d,
     settingsTs: Date.now(),
@@ -3764,7 +3837,7 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
       simpleMode,
       close: () => { setSheetOpen(false); setSheetKind(null); setSheetInit(null); }
     }
-  ), undoItem && /* @__PURE__ */ React.createElement("div", { className: "undo-toast" }, /* @__PURE__ */ React.createElement("span", { className: "undo-msg" }, "Deleted “", undoItem.label, "”"), /* @__PURE__ */ React.createElement("button", { className: "undo-btn", onClick: restoreUndo }, "Undo")), /* @__PURE__ */ React.createElement("nav", { className: "tabbar" }, /* @__PURE__ */ React.createElement("div", { className: "tabbar-inner" }, TABS.map(([id, label, ic]) => /* @__PURE__ */ React.createElement("button", { key: id, className: "tb" + (effTab === id ? " on" : ""), onClick: () => setTab(id) }, /* @__PURE__ */ React.createElement("span", { className: "tb-ic" }, ICONS[ic] ? ICONS[ic](effTab === id) : ic), /* @__PURE__ */ React.createElement("span", { className: "tb-label" }, label), id === "activity" && uncat !== 0 && !simpleMode ? /* @__PURE__ */ React.createElement("span", { className: "dot" }) : null)))));
+  ), undoItem && /* @__PURE__ */ React.createElement("div", { className: "undo-toast" }, /* @__PURE__ */ React.createElement("span", { className: "undo-msg" }, "Deleted “", undoItem.label, "”"), /* @__PURE__ */ React.createElement("button", { className: "undo-btn", onClick: restoreUndo }, "Undo")), !undoItem && bulkPrompt && /* @__PURE__ */ React.createElement("div", { className: "undo-toast" }, /* @__PURE__ */ React.createElement("span", { className: "undo-msg" }, "Apply to ", bulkPrompt.count, " more “", bulkPrompt.merchant, "”?"), /* @__PURE__ */ React.createElement("button", { className: "undo-btn", onClick: applyBulk }, "Apply all")), /* @__PURE__ */ React.createElement("nav", { className: "tabbar" }, /* @__PURE__ */ React.createElement("div", { className: "tabbar-inner" }, TABS.map(([id, label, ic]) => /* @__PURE__ */ React.createElement("button", { key: id, className: "tb" + (effTab === id ? " on" : ""), onClick: () => setTab(id) }, /* @__PURE__ */ React.createElement("span", { className: "tb-ic" }, ICONS[ic] ? ICONS[ic](effTab === id) : ic), /* @__PURE__ */ React.createElement("span", { className: "tb-label" }, label), id === "activity" && uncat !== 0 && !simpleMode ? /* @__PURE__ */ React.createElement("span", { className: "dot" }) : null)))));
 }
 function Home(p) {
   const {
@@ -3883,6 +3956,14 @@ function SimpleHome(p) {
     return month === CURRENT_MONTH;
   }
   const perDay = daysRemaining > 0 && monthNet > 0 ? Math.floor(monthNet / daysRemaining) : null;
+  // money until next paycheck: spendable buffer (bank minus your floor)
+  // divided across the days until your next check
+  const pcSched = (settings.paycheck || {}).schedule || "biweekly";
+  const nextPay = C.nextPayday((settings.paycheck || {}).payDate, pcSched, TODAY);
+  const daysToPay = C.daysUntil(nextPay, TODAY);
+  const floorC = settings.balanceFloor || 0;
+  const untilPay = availableNow != null ? Math.max(0, availableNow - floorC) : null;
+  const perDayToPay = daysToPay > 0 && untilPay != null ? Math.floor(untilPay / daysToPay) : null;
   const savingIdSet = {};
   (p.categories || []).forEach((c) => {
     if (c.class === "SAVING") savingIdSet[c.id] = 1;
@@ -3902,6 +3983,7 @@ function SimpleHome(p) {
   const leniency = C.bucketLeniency(bucket);
   const v = cents != null && cents > 0 && bucket ? C.simpleVerdict(cents, monthNet, projectedEnd, perDay, leniency, {
     bank: availableNow,
+    floor: settings.balanceFloor || 0,
     cushion: totalCushion,
     burn,
     targetRunway: settings.targetRunway,
@@ -3919,7 +4001,9 @@ function SimpleHome(p) {
     bank: {
       ic: "\u2715",
       head: "Stash it.",
-      sub: "That's more than what's in the bank \u2014 you have " + money(v.bank || 0) + " right now."
+      sub: (settings.balanceFloor || 0) > 0
+        ? "That would drop you to " + money(v.bankAfter || 0) + " \u2014 under the " + money(settings.balanceFloor) + " floor you set."
+        : "That's more than what's in the bank \u2014 you have " + money(v.bank || 0) + " right now."
     },
     cushion: {
       ic: "\u2715",
@@ -4007,7 +4091,7 @@ function SimpleHome(p) {
     onKeyDown: (e) => { if (e.key === "Enter") e.target.blur(); },
     onFocus: () => setAskFocus(true),
     onBlur: () => setTimeout(() => setAskFocus(false), 150)
-  }), /* @__PURE__ */ React.createElement("span", { className: "ask-ghost" + (amt.indexOf(".") !== -1 ? " faded" : "") }, amt.indexOf(".") === -1 ? ".00" : "00".slice(amt.length - amt.indexOf(".") - 1))), askFocus && !amt && /* @__PURE__ */ React.createElement("div", { className: "quickrow" }, [500, 2000, 5000, 10000].map((q) => /* @__PURE__ */ React.createElement("button", { key: q, type: "button", className: "quickamt", onPointerDown: () => setAmt(String(q / 100)), onClick: () => setAmt(String(q / 100)) }, "$", q / 100))), cents != null && cents > 0 && /* @__PURE__ */ React.createElement("div", { className: "buckets" }, buckets.map((b) => /* @__PURE__ */ React.createElement(
+  }), /* @__PURE__ */ React.createElement("span", { className: "ask-ghost" + (amt.indexOf(".") !== -1 ? " faded" : "") }, amt.indexOf(".") === -1 ? ".00" : "00".slice(amt.length - amt.indexOf(".") - 1))), nextPay && untilPay != null && /* @__PURE__ */ React.createElement("div", { className: "til-pay" }, /* @__PURE__ */ React.createElement("b", null, money(untilPay)), " to spend before payday", daysToPay > 0 ? " · " + daysToPay + (daysToPay === 1 ? " day" : " days") : " · today", perDayToPay != null && daysToPay > 0 ? /* @__PURE__ */ React.createElement("span", { className: "til-day" }, " · ≈", money(perDayToPay), "/day") : null), askFocus && !amt && /* @__PURE__ */ React.createElement("div", { className: "quickrow" }, [500, 2000, 5000, 10000].map((q) => /* @__PURE__ */ React.createElement("button", { key: q, type: "button", className: "quickamt", onPointerDown: () => setAmt(String(q / 100)), onClick: () => setAmt(String(q / 100)) }, "$", q / 100))), cents != null && cents > 0 && /* @__PURE__ */ React.createElement("div", { className: "buckets" }, buckets.map((b) => /* @__PURE__ */ React.createElement(
     "button",
     {
       key: b.id,
@@ -4751,6 +4835,15 @@ function Settings(p) {
       /* @__PURE__ */ React.createElement("option", { value: "semimonthly" }, "Twice a month"),
       /* @__PURE__ */ React.createElement("option", { value: "monthly" }, "Monthly")
     )),
+    /* @__PURE__ */ React.createElement("div", { className: "field" }, /* @__PURE__ */ React.createElement("label", null, "Next payday", /* @__PURE__ */ React.createElement("span", { className: "f-sub" }, "powers “left until payday” on the home screen")), /* @__PURE__ */ React.createElement(
+      "input",
+      {
+        type: "date",
+        style: { width: 150 },
+        defaultValue: pay.payDate || "",
+        onChange: (e) => applyPaycheck({ payDate: e.target.value })
+      }
+    )),
     payMonthly > 0 && /* @__PURE__ */ React.createElement("div", { className: "taxbox" }, /* @__PURE__ */ React.createElement("div", { className: "tax-net" }, fmt0(payMonthly), /* @__PURE__ */ React.createElement("span", null, "/mo take-home")))
   ), /* @__PURE__ */ React.createElement(
     Acc,
@@ -4798,6 +4891,16 @@ function Settings(p) {
         inputMode: "decimal",
         defaultValue: ((settings.savedStart || 0) / 100).toFixed(0),
         onBlur: setMoney("savedStart")
+      }
+    )),
+    /* @__PURE__ */ React.createElement("div", { className: "field" }, /* @__PURE__ */ React.createElement("label", null, "Keep at least", /* @__PURE__ */ React.createElement("span", { className: "f-sub" }, "a bank floor the decider won't let you drop under")), /* @__PURE__ */ React.createElement(
+      "input",
+      {
+        key: "bf" + rev,
+        type: "number",
+        inputMode: "decimal",
+        defaultValue: ((settings.balanceFloor || 0) / 100).toFixed(0),
+        onBlur: setMoney("balanceFloor")
       }
     )),
     /* @__PURE__ */ React.createElement("div", { className: "field" }, /* @__PURE__ */ React.createElement("label", null, "Goal", /* @__PURE__ */ React.createElement("span", { className: "f-sub" }, "months it should cover")), /* @__PURE__ */ React.createElement(
