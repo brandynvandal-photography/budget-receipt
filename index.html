@@ -2839,7 +2839,17 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     // newer than the plan suppresses the deposit (same rule as merge/effect).
     const id = "recinc-" + CURRENT_MONTH;
     const amt = settings.monthlyIncome || 0;
-    if (bankTruth) return incomeRaw.filter((e) => e.id !== id);
+    if (bankTruth) {
+      // bank-truth: IN includes the monthly plan as a gap-fill — the plan
+      // entry is worth (plan − real deposits this month), so IN shows the
+      // full plan now and shrinks 1:1 as real paychecks land. No doubles.
+      const base = incomeRaw.filter((e) => e.id !== id);
+      if (amt <= 0) return base;
+      const real = base.reduce((s, e) => s + (C.monthOf(e.date) === CURRENT_MONTH ? e.amount : 0), 0);
+      const gap = Math.max(0, amt - real);
+      if (!gap) return base;
+      return [...base, { id, date: CURRENT_MONTH + "-01", amount: gap, source: "Monthly income (plan)" }];
+    }
     if (amt <= 0) return incomeRaw;
     const deadTs = ((data.deleted || {}).income || []).reduce((mx, x) => {
       if (!x.startsWith(id + "@")) return mx;
