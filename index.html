@@ -527,6 +527,22 @@ body{background:linear-gradient(180deg,#16413a 0px,#10302b 300px,#0a1614 680px) 
 @keyframes wink-squish{0%,100%{transform:scaleY(1)}50%{transform:scaleY(.15)}}
 .pocket-brand svg{animation:pocket-in .55s cubic-bezier(.34,1.56,.64,1) both}
 @keyframes pocket-in{from{transform:translateY(14px) scale(.6);opacity:0}to{transform:none;opacity:1}}
+/* animated title: word flips Stash(green) <-> Spend(white); ? stays static */
+.ask-title{line-height:1.15}
+.flipword{display:inline-block;height:1.15em;overflow:hidden;vertical-align:bottom}
+.flip-col{display:flex;flex-direction:column;animation:flip-cycle 4.4s cubic-bezier(.7,0,.3,1) infinite}
+.flip-col > span{height:1.15em;line-height:1.15em}
+.fw-stash{color:var(--accent)}
+.fw-spend{color:var(--ink)}
+@keyframes flip-cycle{0%,42%{transform:translateY(0)}50%,92%{transform:translateY(-1.15em)}100%{transform:translateY(0)}}
+.ask-q{color:var(--ink)}
+/* your-call coin flip (AMBER verdict) */
+.stage-wrap.coin{width:50px;height:50px}
+.anim-coin{position:absolute;left:0;top:0;will-change:transform;
+  animation:coin-flip 1.05s cubic-bezier(.3,.1,.3,1) both}
+@keyframes coin-flip{0%{transform:translate3d(0,-10px,0) rotateY(0);opacity:0}
+  18%{opacity:1}55%{transform:translate3d(0,2px,0) rotateY(540deg)}
+  100%{transform:translate3d(0,0,0) rotateY(900deg);opacity:1}}
 .ask-help{font-size:13px;color:var(--ink2);text-align:left;background:rgba(255,255,255,.04);
   border:1px solid var(--grid);border-radius:12px;padding:10px 12px;margin:10px 0 2px;line-height:1.5}
 .ask-title{position:relative}
@@ -577,8 +593,9 @@ body{background:linear-gradient(180deg,#16413a 0px,#10302b 300px,#0a1614 680px) 
 .swipe-cell.cur .bubble{transform:none;opacity:1}
 
 @media (prefers-reduced-motion: reduce){
-  .val-pulse,.meter > i,.sheet,.sheet-bg,.fan-item,.tab-pane,.nc-bar,.anim-bill,.anim-card,.verdict,.pocket-brand svg{animation:none}
+  .val-pulse,.meter > i,.sheet,.sheet-bg,.fan-item,.tab-pane,.nc-bar,.anim-bill,.anim-card,.verdict,.pocket-brand svg,.anim-coin{animation:none}
   .ty,.wink{animation:none;opacity:1}
+  .flip-col{animation:none;transform:none}
   .swipe-cell .bubble{transition:none;transform:none;opacity:1}
   .jar-liq{transition:none}
 }
@@ -2652,7 +2669,7 @@ function Fab({ openSheet }) {
     openSheet(null);
   };
   const pick = (k) => { setFan(false); buzz(6); openSheet(k); };
-  const items = [["income", "\u{1F4B5}", "Income"], ["save", "\u{1F3E6}", "Stash"]];
+  const items = [["spend", "\u{1F4B8}", "Spend"], ["income", "\u{1F4B5}", "Income"], ["save", "\u{1F3E6}", "Stash"]];
   return /* @__PURE__ */ React.createElement(React.Fragment, null, fan && /* @__PURE__ */ React.createElement("div", { className: "fan-bg", onClick: () => setFan(false) }), fan && /* @__PURE__ */ React.createElement("div", { className: "fan" }, items.map(([k, ic, label], i) => /* @__PURE__ */ React.createElement("button", { key: k, type: "button", className: "fan-item", style: { animationDelay: i * 35 + "ms" }, onClick: () => pick(k) }, ic, " ", label))), /* @__PURE__ */ React.createElement("button", {
     className: "addbtn",
     "aria-label": "Add transaction",
@@ -2717,6 +2734,14 @@ function SwipeAnim() {
   return /* @__PURE__ */ React.createElement("div", { className: "stage-wrap", "aria-hidden": true }, /* @__PURE__ */ React.createElement("div", { className: "anim-card" }, /* @__PURE__ */ React.createElement("svg", { width: 84, height: 46, viewBox: "0 0 72 36" }, /* @__PURE__ */ React.createElement("rect", { x: 25, y: 4, width: 22, height: 14, rx: 2.5, fill: "var(--accent)" }), /* @__PURE__ */ React.createElement("rect", { x: 25, y: 7.5, width: 22, height: 3, fill: "#0a1614", opacity: 0.5 }))), /* @__PURE__ */ React.createElement("svg", { className: "stage-front", width: 84, height: 46, viewBox: "0 0 72 36" }, /* @__PURE__ */ React.createElement("rect", { x: 6, y: 20, width: 60, height: 10, rx: 3.5, fill: "rgba(10,22,20,.55)", stroke: "var(--ink2)", strokeWidth: 1.4 }), /* @__PURE__ */ React.createElement("rect", { x: 12, y: 19, width: 48, height: 2.4, rx: 1.2, fill: "#0a1614", opacity: 0.7 })));
 }
 // Stash pocket brand mark: jeans pocket, mint stitching, a bill peeking out
+// title word flips between Stash (green) and Spend (white), ? stays static
+function FlipWord() {
+  return /* @__PURE__ */ React.createElement("span", { className: "flipword", "aria-label": "Stash or spend" }, /* @__PURE__ */ React.createElement("span", { className: "flip-col" }, /* @__PURE__ */ React.createElement("span", { className: "fw-stash" }, "Stash"), /* @__PURE__ */ React.createElement("span", { className: "fw-spend" }, "Spend")));
+}
+// "your call" coin flip — AMBER verdict theater
+function CoinAnim() {
+  return /* @__PURE__ */ React.createElement("div", { className: "stage-wrap coin", "aria-hidden": true }, /* @__PURE__ */ React.createElement("div", { className: "anim-coin" }, /* @__PURE__ */ React.createElement("svg", { width: 48, height: 48, viewBox: "0 0 40 40" }, /* @__PURE__ */ React.createElement("circle", { cx: 20, cy: 20, r: 15.5, fill: "var(--warn)", stroke: "#7a5400", strokeWidth: 2 }), /* @__PURE__ */ React.createElement("text", { x: 20, y: 26, textAnchor: "middle", fontSize: 17, fontWeight: 800, fill: "#3a2f10" }, "$"))));
+}
 // tagline types itself on, then winks
 function TypeOn({ text }) {
   return /* @__PURE__ */ React.createElement("span", null, [...text].map((ch, i) => /* @__PURE__ */ React.createElement("span", { key: i, className: "ty", style: { animationDelay: i * 45 + "ms" } }, ch)), /* @__PURE__ */ React.createElement("span", { className: "wink", style: { animationDelay: text.length * 45 + 200 + "ms, " + (text.length * 45 + 550) + "ms" } }, " ;)"));
@@ -3636,7 +3661,7 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     {
       ...{ month, addTxn, addIncome, addBatch, categories, merchantMap },
       initial: sheetInit,
-      initialKind: sheetKind || "income",
+      initialKind: sheetKind || (effTab === "activity" && actView === "income" ? "income" : "spend"),
       simpleMode,
       close: () => { setSheetOpen(false); setSheetKind(null); setSheetInit(null); }
     }
@@ -3875,7 +3900,7 @@ function SimpleHome(p) {
       onClick: () => p.setTab("settings")
     },
     "Set your balance in Settings \u2192"
-  )), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "Left over \xB7 ", monthLabel(month)), /* @__PURE__ */ React.createElement("div", { className: "jarhero" }, /* @__PURE__ */ React.createElement(AnimatedFmt0, { cents: monthNet, className: "bank-val" + (monthNet < 0 ? " overspent" : "") }), /* @__PURE__ */ React.createElement(Jar, { level: leftLevel, size: 30, tint: monthNet < 0 ? "var(--crit)" : void 0, tid: "left" })), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, fmt0(monthIncomeC), " in \xB7 ", fmt0(outC), " out", savedMTD > 0 ? " \xB7 " + fmt0(savedMTD) + " saved" : ""), perDay != null && /* @__PURE__ */ React.createElement("div", { className: "perday" }, "\u2248 ", money(perDay), "/day \xB7 ", daysLeft, "d left")), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "On pace \xB7 ", monthLabel(month)), projectedEnd != null ? /* @__PURE__ */ React.createElement(AnimatedFmt0, { cents: projectedEnd, plus: true, className: "bank-val" + (projectedEnd < 0 ? " overspent" : "") }) : /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "bank-val", style: { opacity: 0.5 } }, "\u2014"), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, "a few days of spending and this shows where ", monthLabel(month), " is headed")))), /* @__PURE__ */ React.createElement("section", { className: "card center ask-card" + (v ? " open" : "") }, /* @__PURE__ */ React.createElement("div", { className: "eyebrow ask-title" }, /* @__PURE__ */ React.createElement("span", { className: "ask-stash" }, "Stash"), " or ", /* @__PURE__ */ React.createElement("span", { className: "ask-spend" }, "spend"), "?", /* @__PURE__ */ React.createElement("button", { className: "info-i", "aria-label": "How this works", onClick: () => setHelpOpen(!helpOpen) }, "i")), helpOpen && /* @__PURE__ */ React.createElement("div", { className: "ask-help" }, "Type a price and pick its category — needs get more slack than fun. Stash checks it against your bank, bills, and goals, then answers."), /* @__PURE__ */ React.createElement("div", { className: "ask-wrap", onClick: () => { if (askRef.current) askRef.current.focus(); } }, /* @__PURE__ */ React.createElement("span", { className: "ask-ghost" }, "$", amt ? "" : "0"), /* @__PURE__ */ React.createElement("input", {
+  )), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "Left over \xB7 ", monthLabel(month)), /* @__PURE__ */ React.createElement("div", { className: "jarhero" }, /* @__PURE__ */ React.createElement(AnimatedFmt0, { cents: monthNet, className: "bank-val" + (monthNet < 0 ? " overspent" : "") }), /* @__PURE__ */ React.createElement(Jar, { level: leftLevel, size: 30, tint: monthNet < 0 ? "var(--crit)" : void 0, tid: "left" })), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, fmt0(monthIncomeC), " in \xB7 ", fmt0(outC), " out", savedMTD > 0 ? " \xB7 " + fmt0(savedMTD) + " saved" : ""), perDay != null && /* @__PURE__ */ React.createElement("div", { className: "perday" }, "\u2248 ", money(perDay), "/day \xB7 ", daysLeft, "d left")), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "On pace \xB7 ", monthLabel(month)), projectedEnd != null ? /* @__PURE__ */ React.createElement(AnimatedFmt0, { cents: projectedEnd, plus: true, className: "bank-val" + (projectedEnd < 0 ? " overspent" : "") }) : /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "bank-val", style: { opacity: 0.5 } }, "\u2014"), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, "a few days of spending and this shows where ", monthLabel(month), " is headed")))), /* @__PURE__ */ React.createElement("section", { className: "card center ask-card" + (v ? " open" : "") }, /* @__PURE__ */ React.createElement("div", { className: "eyebrow ask-title" }, /* @__PURE__ */ React.createElement(FlipWord, null), /* @__PURE__ */ React.createElement("span", { className: "ask-q" }, "?"), /* @__PURE__ */ React.createElement("button", { className: "info-i", "aria-label": "How this works", onClick: () => setHelpOpen(!helpOpen) }, "i")), helpOpen && /* @__PURE__ */ React.createElement("div", { className: "ask-help" }, "Type a price and pick its category — needs get more slack than fun. Stash checks it against your bank, bills, and goals, then answers."), /* @__PURE__ */ React.createElement("div", { className: "ask-wrap", onClick: () => { if (askRef.current) askRef.current.focus(); } }, /* @__PURE__ */ React.createElement("span", { className: "ask-ghost" }, "$", amt ? "" : "0"), /* @__PURE__ */ React.createElement("input", {
     ref: askRef,
     className: "ask-input",
     type: "text",
@@ -3902,7 +3927,11 @@ function SimpleHome(p) {
     },
     /* @__PURE__ */ React.createElement("span", { className: "b-ic" }, b.icon),
     b.label
-  ))), cents != null && cents > 0 && !bucket && /* @__PURE__ */ React.createElement("div", { className: "hint", style: { textAlign: "center", marginTop: 8 } }, "Pick the category that fits — essentials get more slack, fun gets less."), v && monthNet > 0 && cents > 0 && /* @__PURE__ */ React.createElement("div", { className: "impact" }, /* @__PURE__ */ React.createElement("div", { className: "meter " + (v.verdict === "RED" ? "crit-track" : v.verdict === "AMBER" ? "warn-track" : "") }, /* @__PURE__ */ React.createElement("i", { style: { transform: "scaleX(" + Math.max(0, Math.min(1, v.leftAfter / monthNet)).toFixed(4) + ")" } })), /* @__PURE__ */ React.createElement("div", { className: "impact-cap" }, v.leftAfter >= 0 ? money(v.leftAfter) + " left this month after this" : money(-v.leftAfter) + " over for the month")), v && (v.verdict === "RED" || v.verdict === "GREEN") && /* @__PURE__ */ React.createElement("div", { className: "verdict-stage", key: "stage-" + v.verdict + "-" + v.reason }, v.verdict === "RED" ? /* @__PURE__ */ React.createElement(StashAnim, null) : /* @__PURE__ */ React.createElement(SwipeAnim, null)), v && /* @__PURE__ */ React.createElement("div", { key: "vd-" + v.verdict, className: "verdict " + v.verdict.toLowerCase(), role: "status" }, /* @__PURE__ */ React.createElement("span", { className: "v-ic" }, copy.ic), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("b", null, copy.head), /* @__PURE__ */ React.createElement("span", { className: "v-sub" }, copy.sub))), v && v.verdict !== "RED" && bucket !== "emergency" && inProgress && /* @__PURE__ */ React.createElement("div", { className: "logit-row" }, /* @__PURE__ */ React.createElement("button", { className: "logit stash", onClick: () => {
+  ))), cents != null && cents > 0 && !bucket && /* @__PURE__ */ React.createElement("div", { className: "hint", style: { textAlign: "center", marginTop: 8 } }, "Pick the category that fits — essentials get more slack, fun gets less."), v && monthNet > 0 && cents > 0 && /* @__PURE__ */ React.createElement("div", { className: "impact" }, /* @__PURE__ */ React.createElement("div", { className: "meter " + (v.verdict === "RED" ? "crit-track" : v.verdict === "AMBER" ? "warn-track" : "") }, /* @__PURE__ */ React.createElement("i", { style: { transform: "scaleX(" + Math.max(0, Math.min(1, v.leftAfter / monthNet)).toFixed(4) + ")" } })), /* @__PURE__ */ React.createElement("div", { className: "impact-cap" }, v.leftAfter >= 0 ? money(v.leftAfter) + " left this month after this" : money(-v.leftAfter) + " over for the month")), v && /* @__PURE__ */ React.createElement("div", { className: "verdict-stage", key: "stage-" + v.verdict + "-" + v.reason }, v.verdict === "RED" ? /* @__PURE__ */ React.createElement(StashAnim, null) : v.verdict === "GREEN" ? /* @__PURE__ */ React.createElement(SwipeAnim, null) : /* @__PURE__ */ React.createElement(CoinAnim, null)), v && /* @__PURE__ */ React.createElement("div", { key: "vd-" + v.verdict, className: "verdict " + v.verdict.toLowerCase(), role: "status" }, /* @__PURE__ */ React.createElement("span", { className: "v-ic" }, copy.ic), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("b", null, copy.head), /* @__PURE__ */ React.createElement("span", { className: "v-sub" }, copy.sub))), v && v.verdict !== "RED" && bucket !== "emergency" && inProgress && /* @__PURE__ */ React.createElement("div", { className: "logit-row" }, /* @__PURE__ */ React.createElement("button", { className: "logit", onClick: () => {
+    const bc = { food: "gro", gas: "trans", bills: "bills" }[bucket];
+    p.openAdd({ amount: amt, categoryId: bc && p.catById && p.catById[bc] ? bc : "" });
+    setAmt("");
+  } }, "Log as spent"), /* @__PURE__ */ React.createElement("button", { className: "logit stash", onClick: () => {
     const savingCat = (p.categories || []).find((c) => c.class === "SAVING");
     if (p.addTxn({ date: TODAY, merchant: "Stashed instead", amount: amt, categoryId: savingCat ? savingCat.id : "" })) {
       buzz([8, 30, 8]);
@@ -4321,7 +4350,7 @@ function preprocessImage(img) {
   return canvas;
 }
 function AddSheet({ month, addTxn, addIncome, addBatch, categories, merchantMap, initial, initialKind, simpleMode, close }) {
-  const [kind, setKind] = useState(initialKind === "save" ? "save" : "income");
+  const [kind, setKind] = useState(initialKind || "spend");
   const defaultDate = month === CURRENT_MONTH ? TODAY : month + "-15";
   const [form, setForm] = useState({ date: defaultDate, merchant: "", amount: "", categoryId: "", ...initial || {} });
   const [scan, setScan] = useState({ phase: "idle", progress: 0, msg: "" });
@@ -4430,7 +4459,7 @@ function AddSheet({ month, addTxn, addIncome, addBatch, categories, merchantMap,
     if (chosen.length && addBatch(chosen, rowsDate)) close();
   };
   const busy = scan.phase === "loading" || scan.phase === "reading";
-  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "sheet-bg", onClick: close }), /* @__PURE__ */ React.createElement(DragSheetShell, { close },/* @__PURE__ */ React.createElement("h3", null, rows ? "Found " + rows.length + " items \u2014 check them" : "Add " + (kind === "income" ? "income" : kind === "save" ? "savings" : "spending")), false && /* @__PURE__ */ React.createElement("label", { className: "scanbtn" + (busy ? " busy" : "") }, /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "sheet-bg", onClick: close }), /* @__PURE__ */ React.createElement(DragSheetShell, { close },/* @__PURE__ */ React.createElement("h3", null, rows ? "Found " + rows.length + " items \u2014 check them" : "Add " + (kind === "income" ? "income" : kind === "save" ? "savings" : "spending")), !rows && /* @__PURE__ */ React.createElement("label", { className: "scanbtn" + (busy ? " busy" : "") }, /* @__PURE__ */ React.createElement(
     "input",
     {
       type: "file",
@@ -4471,7 +4500,7 @@ function AddSheet({ month, addTxn, addIncome, addBatch, categories, merchantMap,
   ))), /* @__PURE__ */ React.createElement("span", { className: "s-amt" + (r.kind === "income" ? " pos-amt" : r.kind === "refund" ? " ref-amt" : "") }, r.kind === "income" ? "+" : r.kind === "refund" ? "\u2212" : "", money(r.cents))))), /* @__PURE__ */ React.createElement("div", { className: "f-grid", style: { marginTop: 10 } }, /* @__PURE__ */ React.createElement("input", { type: "date", value: rowsDate, onChange: (e) => setRowsDate(e.target.value) }), /* @__PURE__ */ React.createElement("button", { className: "btn quiet", onClick: () => {
     setRows(null);
     setScan({ phase: "idle", progress: 0, msg: "" });
-  } }, "Back"), /* @__PURE__ */ React.createElement("button", { className: "save", onClick: importRows, disabled: !includedCount }, "Add ", includedCount, " item", includedCount === 1 ? "" : "s")), /* @__PURE__ */ React.createElement("div", { className: "hint" }, "Uses one date for all items \u2014 you can edit any of them later in Activity.")), !rows && /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "seg" }, /* @__PURE__ */ React.createElement("button", { className: kind === "income" ? "on" : "", onClick: () => setKind("income") }, "Income"), /* @__PURE__ */ React.createElement("button", { className: kind === "save" ? "on" : "", onClick: () => setKind("save") }, "Set aside")), /* @__PURE__ */ React.createElement("div", { className: "f-grid" }, /* @__PURE__ */ React.createElement(
+  } }, "Back"), /* @__PURE__ */ React.createElement("button", { className: "save", onClick: importRows, disabled: !includedCount }, "Add ", includedCount, " item", includedCount === 1 ? "" : "s")), /* @__PURE__ */ React.createElement("div", { className: "hint" }, "Uses one date for all items \u2014 you can edit any of them later in Activity.")), !rows && /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "seg" }, /* @__PURE__ */ React.createElement("button", { className: kind === "spend" ? "on" : "", onClick: () => setKind("spend") }, "Spending"), /* @__PURE__ */ React.createElement("button", { className: kind === "income" ? "on" : "", onClick: () => setKind("income") }, "Income"), /* @__PURE__ */ React.createElement("button", { className: kind === "save" ? "on" : "", onClick: () => setKind("save") }, "Set aside")), /* @__PURE__ */ React.createElement("div", { className: "f-grid" }, /* @__PURE__ */ React.createElement(
     "input",
     {
       className: "full",
