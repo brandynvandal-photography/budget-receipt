@@ -447,6 +447,13 @@ body{background:linear-gradient(180deg,#16413a 0px,#10302b 300px,#0a1614 680px) 
 .quickamt{border:1px solid var(--grid);background:transparent;color:var(--ink2);border-radius:999px;
   padding:6px 14px;font-size:13.5px;font-weight:600;cursor:pointer;transition:transform .12s ease}
 .quickamt:active{transform:scale(.96)}
+/* Activity search + sort bar */
+.actbar{display:flex;gap:8px;margin-bottom:12px}
+.actsearch{flex:1;min-width:0;border:1px solid var(--grid);border-radius:11px;padding:10px 12px;
+  background:var(--surface);color:var(--ink);font-size:14px;-webkit-appearance:none;appearance:none}
+.actsearch::placeholder{color:var(--muted)}
+.actsort{border:1px solid var(--grid);border-radius:11px;padding:10px 12px;background:var(--surface);
+  color:var(--ink2);font-size:13.5px;font-weight:600;-webkit-appearance:none;appearance:none}
 .logit{display:block;width:100%;margin-top:10px;background:transparent;border:1px solid var(--grid);
   color:var(--ink2);border-radius:999px;padding:10px 14px;font-size:13.5px;font-weight:600;cursor:pointer}
 .logit-row{display:flex;gap:8px;margin-top:10px}
@@ -2428,6 +2435,11 @@ const MIGRATIONS = [
     });
     del.txns = del.txns.slice(-1e3);
     delete data.bills;
+    // "Bills" is now just a label you can tag a spend with — neutral class
+    // so it never feeds NEED-burn, runway, or allocation (no number moves).
+    const bc = (data.categories || []).find((c) => c.id === "bills");
+    if (bc) bc.class = "BILL";
+    else if (data.categories) data.categories.push({ id: "bills", name: "Bills", class: "BILL", carryover: "STRICT", icon: "\u{1F4C4}" });
     data.schemaVersion = 9;
   }
 ];
@@ -4173,6 +4185,8 @@ function Activity(p) {
   } = p;
   const [showAll, setShowAll] = useState(false);
   const [editing, setEditing] = useState(null);
+  const [q, setQ] = useState("");
+  const [sortBy, setSortBy] = useState("date");
   const opts = [/* @__PURE__ */ React.createElement("option", { key: "_", value: "" }, "\u{1F3F7} needs a label")].concat(
     categories.map((c) => /* @__PURE__ */ React.createElement("option", { key: c.id, value: c.id }, c.icon, " ", c.name))
   );
@@ -4180,11 +4194,18 @@ function Activity(p) {
   categories.forEach((c) => {
     if (c.class === "SAVING") savingIds[c.id] = 1;
   });
-  const spendList = txns.filter((t) => (showAll || C.monthOf(t.date) === month) && !savingIds[t.categoryId]).slice().sort((a, b) => a.date < b.date ? 1 : -1);
-  const saveList = txns.filter((t) => (showAll || C.monthOf(t.date) === month) && savingIds[t.categoryId]).slice().sort((a, b) => a.date < b.date ? 1 : -1);
-  const incomeList = income.filter((e) => showAll || C.monthOf(e.date) === month).slice().sort((a, b) => a.date < b.date ? 1 : -1);
-  const uncatFirst = spendList.slice().sort((a, b) => (a.categoryId == null ? -1 : 0) - (b.categoryId == null ? -1 : 0));
-  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h2", { className: "screen-title" }, "Activity"), /* @__PURE__ */ React.createElement(Swiper, { labels: ["In the bank", "Saved up", "Safety net"] }, /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "In the bank"), p.availableNow != null ? /* @__PURE__ */ React.createElement(AnimatedMoneySplit, { cents: p.availableNow, className: "bank-val" + (p.availableNow < 0 ? " overspent" : "") }) : /* @__PURE__ */ React.createElement("div", { className: "bank-val", style: { opacity: 0.5 } }, "\u2014"), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, (p.settings.paycheck || {}).amount > 0 ? money(p.settings.paycheck.amount) + " per paycheck \u00b7 " + fmt0(monthSpendC) + " out \u00b7 " + monthLabel(month) : fmt0(monthIncomeC) + " in \u00b7 " + fmt0(monthSpendC) + " out \u00b7 " + monthLabel(month))), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "Saved up"), /* @__PURE__ */ React.createElement(AnimatedFmt0, { className: "bank-val", cents: p.savedTotal }), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, "Chime Savings + Fidelity")), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "Safety net"), /* @__PURE__ */ React.createElement("div", { className: "bank-val" }, p.runway === Infinity ? "\u2014" : p.runway.toFixed(1) + " mo"), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, "if income stopped"))), /* @__PURE__ */ React.createElement("div", { className: "seg" }, /* @__PURE__ */ React.createElement("button", { className: view === "spend" ? "on" : "", onClick: () => setView("spend") }, "Spending"), /* @__PURE__ */ React.createElement("button", { className: view === "income" ? "on" : "", onClick: () => setView("income") }, "Income"), /* @__PURE__ */ React.createElement("button", { className: view === "save" ? "on" : "", onClick: () => setView("save") }, "Savings"), /* @__PURE__ */ React.createElement("button", { className: showAll ? "on" : "", onClick: () => setShowAll(!showAll) }, showAll ? "All \u2713" : "All")), view === "spend" && (() => {
+  const catName = (id) => { const c = categories.find((x) => x.id === id); return c ? c.name : ""; };
+  const q2 = q.trim().toLowerCase();
+  const matchTx = (t) => !q2 || ((t.merchant || "") + " " + catName(t.categoryId)).toLowerCase().indexOf(q2) !== -1;
+  const matchIn = (e) => !q2 || (e.source || "").toLowerCase().indexOf(q2) !== -1;
+  const sortFn = sortBy === "amount"
+    ? (a, b) => Math.abs(b.amount) - Math.abs(a.amount)
+    : (a, b) => a.date < b.date ? 1 : a.date > b.date ? -1 : 0;
+  const spendList = txns.filter((t) => (showAll || C.monthOf(t.date) === month) && !savingIds[t.categoryId] && matchTx(t)).slice().sort(sortFn);
+  const saveList = txns.filter((t) => (showAll || C.monthOf(t.date) === month) && savingIds[t.categoryId] && matchTx(t)).slice().sort(sortFn);
+  const incomeList = income.filter((e) => (showAll || C.monthOf(e.date) === month) && matchIn(e)).slice().sort(sortFn);
+  const uncatFirst = spendList;
+  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h2", { className: "screen-title" }, "Activity"), /* @__PURE__ */ React.createElement(Swiper, { labels: ["In the bank", "Saved up", "Safety net"] }, /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "In the bank"), p.availableNow != null ? /* @__PURE__ */ React.createElement(AnimatedMoneySplit, { cents: p.availableNow, className: "bank-val" + (p.availableNow < 0 ? " overspent" : "") }) : /* @__PURE__ */ React.createElement("div", { className: "bank-val", style: { opacity: 0.5 } }, "\u2014"), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, (p.settings.paycheck || {}).amount > 0 ? money(p.settings.paycheck.amount) + " per paycheck \u00b7 " + fmt0(monthSpendC) + " out \u00b7 " + monthLabel(month) : fmt0(monthIncomeC) + " in \u00b7 " + fmt0(monthSpendC) + " out \u00b7 " + monthLabel(month))), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "Saved up"), /* @__PURE__ */ React.createElement(AnimatedFmt0, { className: "bank-val", cents: p.savedTotal }), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, "Chime Savings + Fidelity")), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "Safety net"), /* @__PURE__ */ React.createElement("div", { className: "bank-val" }, p.runway === Infinity ? "\u2014" : p.runway.toFixed(1) + " mo"), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, "if income stopped"))), /* @__PURE__ */ React.createElement("div", { className: "seg" }, /* @__PURE__ */ React.createElement("button", { className: view === "spend" ? "on" : "", onClick: () => setView("spend") }, "Spending"), /* @__PURE__ */ React.createElement("button", { className: view === "income" ? "on" : "", onClick: () => setView("income") }, "Income"), /* @__PURE__ */ React.createElement("button", { className: view === "save" ? "on" : "", onClick: () => setView("save") }, "Savings"), /* @__PURE__ */ React.createElement("button", { className: showAll ? "on" : "", onClick: () => setShowAll(!showAll) }, showAll ? "All \u2713" : "All")), /* @__PURE__ */ React.createElement("div", { className: "actbar" }, /* @__PURE__ */ React.createElement("input", { className: "actsearch", type: "search", inputMode: "search", placeholder: "\u{1F50D} Search", value: q, onChange: (e) => setQ(e.target.value) }), /* @__PURE__ */ React.createElement("select", { className: "actsort", value: sortBy, onChange: (e) => setSortBy(e.target.value), "aria-label": "Sort" }, /* @__PURE__ */ React.createElement("option", { value: "date" }, "Newest"), /* @__PURE__ */ React.createElement("option", { value: "amount" }, "Amount \u2193"))), view === "spend" && (() => {
     const isBill = (t) => String(t.id || "").startsWith("recbill");
     const billRows = uncatFirst.filter(isBill);
     const manualRows = uncatFirst.filter((t) => !isBill(t));
@@ -4244,7 +4265,7 @@ function EditSheet({ kind, entry, categories, simpleMode, save, close, addBill }
       value: f.merchant,
       onChange: (e) => setF({ ...f, merchant: e.target.value })
     }
-  ), /* @__PURE__ */ React.createElement("input", { type: "date", value: f.date, onChange: (e) => setF({ ...f, date: e.target.value }) }), kind === "txn" && !simpleMode && /* @__PURE__ */ React.createElement(
+  ), /* @__PURE__ */ React.createElement("input", { type: "date", value: f.date, onChange: (e) => setF({ ...f, date: e.target.value }) }), kind === "txn" && /* @__PURE__ */ React.createElement(
     "select",
     {
       className: "full",
