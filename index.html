@@ -539,10 +539,14 @@ body{background:linear-gradient(180deg,#16413a 0px,#10302b 300px,#0a1614 680px) 
 /* your-call coin flip (AMBER verdict) */
 .stage-wrap.coin{width:50px;height:50px}
 .anim-coin{position:absolute;left:0;top:0;will-change:transform;
-  animation:coin-flip 1.05s cubic-bezier(.3,.1,.3,1) both}
-@keyframes coin-flip{0%{transform:translate3d(0,-10px,0) rotateY(0);opacity:0}
-  18%{opacity:1}55%{transform:translate3d(0,2px,0) rotateY(540deg)}
-  100%{transform:translate3d(0,0,0) rotateY(900deg);opacity:1}}
+  animation:coin-flip 1s cubic-bezier(.34,1.2,.5,1) both}
+/* toss up + in-plane spin: never goes edge-on (no vanish) and lands upright
+   (ends on a 360deg multiple) — no mirrored backface */
+@keyframes coin-flip{
+  0%{transform:translateY(0) scale(.5) rotate(0);opacity:0}
+  25%{opacity:1}
+  55%{transform:translateY(-16px) scale(1.08) rotate(380deg)}
+  100%{transform:translateY(0) scale(1) rotate(720deg);opacity:1}}
 .ask-help{font-size:13px;color:var(--ink2);text-align:left;background:rgba(255,255,255,.04);
   border:1px solid var(--grid);border-radius:12px;padding:10px 12px;margin:10px 0 2px;line-height:1.5}
 .ask-title{position:relative}
