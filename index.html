@@ -3774,7 +3774,7 @@ function SimpleHome(p) {
   const [askFocus, setAskFocus] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const askRef = useRef(null);
-  const cents = C.parseDollars(amt);
+  const cents = C.parseDollars(amt.replace(/\.$/, ""));
   const leniency = C.bucketLeniency(bucket);
   const v = cents != null && cents > 0 && bucket ? C.simpleVerdict(cents, monthNet, projectedEnd, perDay, leniency, {
     bank: availableNow,
@@ -3880,7 +3880,7 @@ function SimpleHome(p) {
     inputMode: "decimal",
     "aria-label": "Amount",
     value: amt,
-    style: { width: amt.length ? amt.length + "ch" : "2px" },
+    style: { width: amt.length ? amt.replace(/\./g, "").length + (amt.indexOf(".") !== -1 ? 0.4 : 0) + "ch" : "2px" },
     onChange: (e) => {
       const clean = e.target.value.replace(/[^0-9.]/g, "");
       const di = clean.indexOf(".");
