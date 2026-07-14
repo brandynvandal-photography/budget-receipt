@@ -1349,7 +1349,7 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
     // block — just a nudge to sit with a large discretionary buy.
     if (L < 1 && x.bank != null) {
       var spendable = x.bank - floor;
-      if (spendable > 0 && amount > spendable * 0.4 * L) return done("AMBER", "want");
+      if (spendable > 0 && amount > spendable * 0.33 * L) return done("AMBER", "want");
     }
     // future outlook: the month can look fine while the BANK slips under
     // what next month's bills need — warn before the float breaks
@@ -2441,8 +2441,10 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
       C.simpleVerdict(C.c(600), C.c(3000), C.c(2500), C.c(80), 0.7, { bank: C.c(1500), floor: 0 }).reason, "want");
     eq("modest fun buy vs bank is not a want (100 on 1500)",
       C.simpleVerdict(C.c(100), C.c(3000), C.c(2500), C.c(80), 0.7, { bank: C.c(1500), floor: 0 }).reason !== "want", true);
-    eq("general is looser than fun on the want nudge (500 on 1500)",
-      C.simpleVerdict(C.c(500), C.c(3000), C.c(2500), C.c(80), 0.9, { bank: C.c(1500), floor: 0 }).reason !== "want", true);
+    eq("fun trips the want nudge at 400 on 1500",
+      C.simpleVerdict(C.c(400), C.c(3000), C.c(2500), C.c(80), 0.7, { bank: C.c(1500), floor: 0 }).reason, "want");
+    eq("general is looser — 400 on 1500 is not yet a want",
+      C.simpleVerdict(C.c(400), C.c(3000), C.c(2500), C.c(80), 0.9, { bank: C.c(1500), floor: 0 }).reason !== "want", true);
     eq("a need (food) never trips the want nudge",
       C.simpleVerdict(C.c(600), C.c(3000), C.c(2500), C.c(80), 2, { bank: C.c(1500), floor: 0 }).reason !== "want", true);
     ok("leniency never overrides a hard RED (no money left)",
