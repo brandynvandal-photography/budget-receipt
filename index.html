@@ -509,6 +509,16 @@ body{background:linear-gradient(180deg,#16413a 0px,#10302b 300px,#0a1614 680px) 
 .bankish .ask-card{margin-top:min(10vh, 92px);position:relative;transition:margin-top .25s ease}
 .bankish .ask-card.open{margin-top:min(3vh, 28px)}
 .ask-card .ask-input{text-align:center;appearance:none;-webkit-appearance:none}
+/* money mask: $ prefix and ghost .00 are static; the input auto-sizes to
+   its digits; once '.' is typed the remaining cents ghost fades back */
+.ask-wrap{display:flex;align-items:baseline;justify-content:center;background:var(--surface);
+  border:1.5px solid rgba(69,224,166,.35);border-radius:14px;padding:14px;margin:12px 0 2px;cursor:text}
+.ask-wrap:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px rgba(69,224,166,.15)}
+.ask-wrap .ask-input{width:auto;background:none;border:none;padding:0;margin:0;font-size:30px;
+  font-weight:700;color:var(--ink);text-align:left;font-variant-numeric:tabular-nums;outline:none;box-shadow:none}
+.ask-ghost{font-size:30px;font-weight:700;color:var(--muted);font-variant-numeric:tabular-nums;
+  transition:opacity .25s ease;user-select:none}
+.ask-ghost.faded{opacity:.35}
 /* tagline types on, then winks; pocket flies in */
 .ty{opacity:0;animation:ty-in .3s ease both}
 @keyframes ty-in{to{opacity:1}}
@@ -3763,6 +3773,7 @@ function SimpleHome(p) {
   const [bucket, setBucket] = useState(null);
   const [askFocus, setAskFocus] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  const askRef = useRef(null);
   const cents = C.parseDollars(amt);
   const leniency = C.bucketLeniency(bucket);
   const v = cents != null && cents > 0 && bucket ? C.simpleVerdict(cents, monthNet, projectedEnd, perDay, leniency, {
@@ -3862,20 +3873,23 @@ function SimpleHome(p) {
       onClick: () => p.setTab("settings")
     },
     "Set your balance in Settings \u2192"
-  )), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "Left over \xB7 ", monthLabel(month)), /* @__PURE__ */ React.createElement("div", { className: "jarhero" }, /* @__PURE__ */ React.createElement(AnimatedFmt0, { cents: monthNet, className: "bank-val" + (monthNet < 0 ? " overspent" : "") }), /* @__PURE__ */ React.createElement(Jar, { level: leftLevel, size: 30, tint: monthNet < 0 ? "var(--crit)" : void 0, tid: "left" })), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, fmt0(monthIncomeC), " in \xB7 ", fmt0(outC), " out", savedMTD > 0 ? " \xB7 " + fmt0(savedMTD) + " saved" : ""), perDay != null && /* @__PURE__ */ React.createElement("div", { className: "perday" }, "\u2248 ", money(perDay), "/day \xB7 ", daysLeft, "d left")), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "On pace \xB7 ", monthLabel(month)), projectedEnd != null ? /* @__PURE__ */ React.createElement(AnimatedFmt0, { cents: projectedEnd, plus: true, className: "bank-val" + (projectedEnd < 0 ? " overspent" : "") }) : /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "bank-val", style: { opacity: 0.5 } }, "\u2014"), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, "a few days of spending and this shows where ", monthLabel(month), " is headed")))), /* @__PURE__ */ React.createElement("section", { className: "card center ask-card" + (v ? " open" : "") }, /* @__PURE__ */ React.createElement("div", { className: "eyebrow ask-title" }, /* @__PURE__ */ React.createElement("span", { className: "ask-stash" }, "Stash"), " or ", /* @__PURE__ */ React.createElement("span", { className: "ask-spend" }, "spend"), "?", /* @__PURE__ */ React.createElement("button", { className: "info-i", "aria-label": "How this works", onClick: () => setHelpOpen(!helpOpen) }, "i")), helpOpen && /* @__PURE__ */ React.createElement("div", { className: "ask-help" }, "Type a price and pick its category — needs get more slack than fun. Stash checks it against your bank, bills, and goals, then answers."), /* @__PURE__ */ React.createElement(
-    "input",
-    {
-      className: "ask-input",
-      type: "text",
-      inputMode: "decimal",
-      placeholder: "$0.00",
-      value: amt,
-      onChange: (e) => setAmt(e.target.value),
-      onKeyDown: (e) => { if (e.key === "Enter") e.target.blur(); },
-      onFocus: () => setAskFocus(true),
-      onBlur: () => setTimeout(() => setAskFocus(false), 150)
-    }
-  ), askFocus && !amt && /* @__PURE__ */ React.createElement("div", { className: "quickrow" }, [500, 2000, 5000, 10000].map((q) => /* @__PURE__ */ React.createElement("button", { key: q, type: "button", className: "quickamt", onPointerDown: () => setAmt(String(q / 100)), onClick: () => setAmt(String(q / 100)) }, "$", q / 100))), cents != null && cents > 0 && /* @__PURE__ */ React.createElement("div", { className: "buckets" }, buckets.map((b) => /* @__PURE__ */ React.createElement(
+  )), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "Left over \xB7 ", monthLabel(month)), /* @__PURE__ */ React.createElement("div", { className: "jarhero" }, /* @__PURE__ */ React.createElement(AnimatedFmt0, { cents: monthNet, className: "bank-val" + (monthNet < 0 ? " overspent" : "") }), /* @__PURE__ */ React.createElement(Jar, { level: leftLevel, size: 30, tint: monthNet < 0 ? "var(--crit)" : void 0, tid: "left" })), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, fmt0(monthIncomeC), " in \xB7 ", fmt0(outC), " out", savedMTD > 0 ? " \xB7 " + fmt0(savedMTD) + " saved" : ""), perDay != null && /* @__PURE__ */ React.createElement("div", { className: "perday" }, "\u2248 ", money(perDay), "/day \xB7 ", daysLeft, "d left")), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "On pace \xB7 ", monthLabel(month)), projectedEnd != null ? /* @__PURE__ */ React.createElement(AnimatedFmt0, { cents: projectedEnd, plus: true, className: "bank-val" + (projectedEnd < 0 ? " overspent" : "") }) : /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "bank-val", style: { opacity: 0.5 } }, "\u2014"), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, "a few days of spending and this shows where ", monthLabel(month), " is headed")))), /* @__PURE__ */ React.createElement("section", { className: "card center ask-card" + (v ? " open" : "") }, /* @__PURE__ */ React.createElement("div", { className: "eyebrow ask-title" }, /* @__PURE__ */ React.createElement("span", { className: "ask-stash" }, "Stash"), " or ", /* @__PURE__ */ React.createElement("span", { className: "ask-spend" }, "spend"), "?", /* @__PURE__ */ React.createElement("button", { className: "info-i", "aria-label": "How this works", onClick: () => setHelpOpen(!helpOpen) }, "i")), helpOpen && /* @__PURE__ */ React.createElement("div", { className: "ask-help" }, "Type a price and pick its category — needs get more slack than fun. Stash checks it against your bank, bills, and goals, then answers."), /* @__PURE__ */ React.createElement("div", { className: "ask-wrap", onClick: () => { if (askRef.current) askRef.current.focus(); } }, /* @__PURE__ */ React.createElement("span", { className: "ask-ghost" }, "$", amt ? "" : "0"), /* @__PURE__ */ React.createElement("input", {
+    ref: askRef,
+    className: "ask-input",
+    type: "text",
+    inputMode: "decimal",
+    "aria-label": "Amount",
+    value: amt,
+    style: { width: amt.length ? amt.length + "ch" : "2px" },
+    onChange: (e) => {
+      const clean = e.target.value.replace(/[^0-9.]/g, "");
+      const di = clean.indexOf(".");
+      setAmt(di === -1 ? clean : clean.slice(0, di + 1) + clean.slice(di + 1).replace(/\./g, "").slice(0, 2));
+    },
+    onKeyDown: (e) => { if (e.key === "Enter") e.target.blur(); },
+    onFocus: () => setAskFocus(true),
+    onBlur: () => setTimeout(() => setAskFocus(false), 150)
+  }), /* @__PURE__ */ React.createElement("span", { className: "ask-ghost" + (amt.indexOf(".") !== -1 ? " faded" : "") }, amt.indexOf(".") === -1 ? ".00" : "00".slice(amt.length - amt.indexOf(".") - 1))), askFocus && !amt && /* @__PURE__ */ React.createElement("div", { className: "quickrow" }, [500, 2000, 5000, 10000].map((q) => /* @__PURE__ */ React.createElement("button", { key: q, type: "button", className: "quickamt", onPointerDown: () => setAmt(String(q / 100)), onClick: () => setAmt(String(q / 100)) }, "$", q / 100))), cents != null && cents > 0 && /* @__PURE__ */ React.createElement("div", { className: "buckets" }, buckets.map((b) => /* @__PURE__ */ React.createElement(
     "button",
     {
       key: b.id,
