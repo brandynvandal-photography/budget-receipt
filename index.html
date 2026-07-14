@@ -447,6 +447,16 @@ body{background:linear-gradient(180deg,#16413a 0px,#10302b 300px,#0a1614 680px) 
 .quickamt{border:1px solid var(--grid);background:transparent;color:var(--ink2);border-radius:999px;
   padding:6px 14px;font-size:13.5px;font-weight:600;cursor:pointer;transition:transform .12s ease}
 .quickamt:active{transform:scale(.96)}
+/* undo toast (sits just above the tab bar) */
+.undo-toast{position:fixed;left:16px;right:16px;bottom:calc(74px + env(safe-area-inset-bottom));
+  max-width:448px;margin:0 auto;z-index:35;display:flex;align-items:center;justify-content:space-between;
+  gap:12px;background:var(--surface);border:1px solid var(--grid);border-radius:14px;
+  padding:12px 14px;box-shadow:0 8px 24px rgba(0,0,0,.4);animation:toast-in .22s ease}
+@keyframes toast-in{from{transform:translateY(12px);opacity:0}to{transform:none;opacity:1}}
+.undo-msg{font-size:14px;color:var(--ink2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.undo-btn{flex:0 0 auto;background:transparent;border:none;color:var(--accent);font-size:14px;
+  font-weight:800;letter-spacing:.02em;cursor:pointer;padding:4px 6px}
+@media (prefers-reduced-motion: reduce){ .undo-toast{animation:none} }
 /* spend row with inline category on its own line */
 .txrow-2line{flex-direction:column;align-items:stretch;gap:8px}
 .txrow-2line .txrow-line{display:flex;align-items:center;gap:10px}
@@ -2377,7 +2387,7 @@ const { useState, useEffect, useMemo, useCallback, useRef, Component } = React;
 const C = window.BudgetCore;
 const SEED = window.BudgetSeed;
 const STORE = window.BudgetStorage;
-const SCHEMA_VERSION = 10;
+const SCHEMA_VERSION = 11;
 const MIGRATIONS = [
   function v1_to_v2(data) {
     if (!data.sinkingFunds) data.sinkingFunds = JSON.parse(JSON.stringify(SEED.sinkingFunds));
@@ -2455,6 +2465,13 @@ const MIGRATIONS = [
       data.categories.push({ id: "gen", name: "General", class: "WANT", carryover: "STRICT", icon: "\u{1F6CD}️" });
     }
     data.schemaVersion = 10;
+  },
+  function v10_to_v11(data) {
+    // Unknown-category spending is now labeled General (still editable).
+    (data.txns || []).forEach((t) => {
+      if (!t.isTransfer && (t.categoryId == null || t.categoryId === "")) t.categoryId = "gen";
+    });
+    data.schemaVersion = 11;
   }
 ];
 const SYNC_KEY = "budget:sync:v1";
@@ -3049,6 +3066,12 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
   const [inbox, setInbox] = useState(null);
   const [sfBal, setSfBal] = useState(null);
   const [actView, setActView] = useState("spend");
+  const [undoItem, setUndoItem] = useState(null);
+  useEffect(() => {
+    if (!undoItem) return;
+    const t = setTimeout(() => setUndoItem(null), 5000);
+    return () => clearTimeout(t);
+  }, [undoItem]);
   useEffect(() => {
     const amt = settings.monthlyIncome || 0;
     if (amt <= 0 || bankTruth) return;
@@ -3302,10 +3325,10 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
           let rem = spendC - per * dayInfo.merch.length;
           dayInfo.merch.forEach((mName, j) => {
             const cat = R ? R.guessCategory(mName, categories, merchantMap) : null;
-            addT.push({ id: sid + "-" + j, date: day, amount: per + (j === 0 ? rem : 0), categoryId: cat || null, merchant: mName + " (est.)", _m: now });
+            addT.push({ id: sid + "-" + j, date: day, amount: per + (j === 0 ? rem : 0), categoryId: cat || "gen", merchant: mName + " (est.)", _m: now });
           });
         } else {
-          addT.push({ id: sid + "-0", date: day, amount: spendC, categoryId: null, merchant: "Card spending", _m: now });
+          addT.push({ id: sid + "-0", date: day, amount: spendC, categoryId: "gen", merchant: "Card spending", _m: now });
         }
       } else if (delta > 0) {
         addI.push({ id: iid, date: day, amount: delta + dayInfo.inflow, source: "Deposit (bank)", _m: now });
@@ -3496,22 +3519,46 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     return true;
   };
   const stone = (id) => String(id).startsWith("rec") ? id + "@" + Date.now() : id;
-  const deleteTxn = (txnId) => setData((d) => ({
-    ...d,
-    txns: d.txns.filter((t) => t.id !== txnId),
-    deleted: {
-      txns: [...(d.deleted || {}).txns || [], stone(txnId)].slice(-1e3),
-      income: (d.deleted || {}).income || []
-    }
-  }));
-  const deleteIncome = (incId) => setData((d) => ({
-    ...d,
-    income: d.income.filter((e) => e.id !== incId),
-    deleted: {
-      txns: (d.deleted || {}).txns || [],
-      income: [...(d.deleted || {}).income || [], stone(incId)].slice(-1e3)
-    }
-  }));
+  const deleteTxn = (txnId) => {
+    const entry = txns.find((t) => t.id === txnId) || txnsRaw.find((t) => t.id === txnId);
+    const tomb = stone(txnId);
+    if (entry) setUndoItem({ kind: "txn", entry, tomb, label: entry.merchant || "Entry" });
+    setData((d) => ({
+      ...d,
+      txns: d.txns.filter((t) => t.id !== txnId),
+      deleted: {
+        txns: [...(d.deleted || {}).txns || [], tomb].slice(-1e3),
+        income: (d.deleted || {}).income || []
+      }
+    }));
+  };
+  const deleteIncome = (incId) => {
+    const entry = income.find((e) => e.id === incId) || incomeRaw.find((e) => e.id === incId);
+    const tomb = stone(incId);
+    if (entry) setUndoItem({ kind: "income", entry, tomb, label: entry.source || "Deposit" });
+    setData((d) => ({
+      ...d,
+      income: d.income.filter((e) => e.id !== incId),
+      deleted: {
+        txns: (d.deleted || {}).txns || [],
+        income: [...(d.deleted || {}).income || [], tomb].slice(-1e3)
+      }
+    }));
+  };
+  const restoreUndo = () => {
+    const u = undoItem;
+    setUndoItem(null);
+    if (!u) return;
+    setData((d) => {
+      const del = d.deleted || { txns: [], income: [] };
+      if (u.kind === "income") {
+        if (d.income.some((e) => e.id === u.entry.id)) return d;
+        return { ...d, income: [...d.income, u.entry], deleted: { txns: del.txns || [], income: (del.income || []).filter((x) => x !== u.tomb) } };
+      }
+      if (d.txns.some((t) => t.id === u.entry.id)) return d;
+      return { ...d, txns: [...d.txns, u.entry], deleted: { txns: (del.txns || []).filter((x) => x !== u.tomb), income: del.income || [] } };
+    });
+  };
   const recategorize = (txnId, catId) => setData((d) => {
     const txn = d.txns.find((t) => t.id === txnId);
     return {
@@ -3668,7 +3715,7 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
       simpleMode,
       close: () => { setSheetOpen(false); setSheetKind(null); setSheetInit(null); }
     }
-  ), /* @__PURE__ */ React.createElement("nav", { className: "tabbar" }, /* @__PURE__ */ React.createElement("div", { className: "tabbar-inner" }, TABS.map(([id, label, ic]) => /* @__PURE__ */ React.createElement("button", { key: id, className: "tb" + (effTab === id ? " on" : ""), onClick: () => setTab(id) }, /* @__PURE__ */ React.createElement("span", { className: "tb-ic" }, ICONS[ic] ? ICONS[ic](effTab === id) : ic), /* @__PURE__ */ React.createElement("span", { className: "tb-label" }, label), id === "activity" && uncat !== 0 && !simpleMode ? /* @__PURE__ */ React.createElement("span", { className: "dot" }) : null)))));
+  ), undoItem && /* @__PURE__ */ React.createElement("div", { className: "undo-toast" }, /* @__PURE__ */ React.createElement("span", { className: "undo-msg" }, "Deleted “", undoItem.label, "”"), /* @__PURE__ */ React.createElement("button", { className: "undo-btn", onClick: restoreUndo }, "Undo")), /* @__PURE__ */ React.createElement("nav", { className: "tabbar" }, /* @__PURE__ */ React.createElement("div", { className: "tabbar-inner" }, TABS.map(([id, label, ic]) => /* @__PURE__ */ React.createElement("button", { key: id, className: "tb" + (effTab === id ? " on" : ""), onClick: () => setTab(id) }, /* @__PURE__ */ React.createElement("span", { className: "tb-ic" }, ICONS[ic] ? ICONS[ic](effTab === id) : ic), /* @__PURE__ */ React.createElement("span", { className: "tb-label" }, label), id === "activity" && uncat !== 0 && !simpleMode ? /* @__PURE__ */ React.createElement("span", { className: "dot" }) : null)))));
 }
 function Home(p) {
   const {
