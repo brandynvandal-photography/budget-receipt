@@ -642,6 +642,27 @@ body{background:linear-gradient(180deg,#16413a 0px,#10302b 300px,#0a1614 680px) 
 
 .sw-update{position:fixed;left:50%;bottom:calc(84px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:9999;display:flex;align-items:center;gap:12px;background:var(--page);border:1px solid var(--ring);border-radius:12px;padding:9px 10px 9px 15px;box-shadow:0 14px 36px rgba(0,0,0,.45);font-size:14px;font-weight:600;color:var(--ink)}
 .sw-update button{background:var(--accent);color:#08130f;border:none;border-radius:9px;padding:8px 15px;font-weight:700;font-size:13.5px;cursor:pointer}
+.lockgate{position:fixed;inset:0;z-index:10000;background:var(--page);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:32px 24px calc(28px + env(safe-area-inset-bottom,0px));text-align:center}
+.lock-title{font-size:20px;font-weight:800;letter-spacing:-.02em;color:var(--ink);margin-top:4px}
+.lock-sub{font-size:13.5px;color:var(--muted);margin-top:-4px;max-width:32ch}
+.lock-dots{display:flex;gap:14px;margin:12px 0 8px}
+.lock-dot{width:13px;height:13px;border-radius:50%;border:2px solid var(--ring)}
+.lock-dot.on{background:var(--accent);border-color:var(--accent)}
+.lock-dot.err{border-color:var(--crit)}
+.lock-dots.shake{animation:lock-shake .4s}
+@keyframes lock-shake{0%,100%{transform:translateX(0)}20%,60%{transform:translateX(-7px)}40%,80%{transform:translateX(7px)}}
+.lock-pad{display:grid;grid-template-columns:repeat(3,70px);gap:16px;margin-top:6px}
+.lock-key{height:70px;border-radius:50%;border:1px solid var(--ring);background:rgba(255,255,255,.05);color:var(--ink);font-size:25px;font-weight:600;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.lock-key:active{background:var(--accent);color:#08130f;transform:scale(.95)}
+.lock-key.ghost{border-color:transparent;background:transparent;color:var(--muted);font-size:21px}
+.lock-key:disabled{opacity:.55}
+.lock-link{margin-top:10px;background:none;border:none;color:var(--muted);font-size:13.5px;text-decoration:underline;cursor:pointer}
+.lock-forgot{display:flex;flex-direction:column;gap:10px;margin-top:8px;max-width:30ch}
+.lock-warn{font-size:13px;color:var(--crit);line-height:1.4}
+.lock-forgot-row{display:flex;gap:10px;justify-content:center}
+.lock-row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:10px;font-size:14px;color:var(--ink)}
+.lock-row select{border:1px solid var(--ring);border-radius:9px;padding:8px 10px;background:var(--page);color:var(--ink);font-size:14px}
+@media (prefers-reduced-motion:reduce){.lock-dots.shake{animation:none}.lock-key:active{transform:none}}
 </style>
 </head>
 <body>
@@ -3098,8 +3119,122 @@ function App() {
   if (data === null) return /* @__PURE__ */ React.createElement("div", { className: "shell" }, /* @__PURE__ */ React.createElement("div", { className: "boot" }, "opening Stash\u2026"));
   return /* @__PURE__ */ React.createElement(Main, { ...{ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, syncInfo, runSync } });
 }
+/* ---- App lock: a 6-digit PIN gate. The PIN is never stored — only a salted
+   PBKDF2-SHA256 verifier hash. This is a privacy gate (lost/borrowed phone);
+   the coming IndexedDB migration reuses this PIN to encrypt data at rest. ---- */
+const PinLock = {
+  b64(buf) { const b = new Uint8Array(buf); let s = ""; for (let i = 0; i < b.length; i++) s += String.fromCharCode(b[i]); return btoa(s); },
+  unb64(s) { const bin = atob(s), b = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) b[i] = bin.charCodeAt(i); return b; },
+  async derive(pin, salt, iters) {
+    const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(pin), "PBKDF2", false, ["deriveBits"]);
+    const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", salt, iterations: iters, hash: "SHA-256" }, base, 256);
+    return this.b64(bits);
+  },
+  async create(pin) {
+    const salt = crypto.getRandomValues(new Uint8Array(16)), iters = 21e4;
+    return { enabled: true, v: 1, salt: this.b64(salt), iters, hash: await this.derive(pin, salt, iters), autoLockSec: 30 };
+  },
+  async verify(pin, rec) {
+    if (!rec || !rec.hash) return false;
+    let h;
+    try { h = await this.derive(pin, this.unb64(rec.salt), rec.iters || 21e4); } catch (e) { return false; }
+    if (h.length !== rec.hash.length) return false;
+    let diff = 0;
+    for (let i = 0; i < h.length; i++) diff |= h.charCodeAt(i) ^ rec.hash.charCodeAt(i);
+    return diff === 0;
+  }
+};
+const LOCK_LEN = 6;
+function LockGate({ lockRec, onUnlock, onForgot }) {
+  const [pin, setPin] = useState("");
+  const [err, setErr] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [wipe, setWipe] = useState(false);
+  // auto-check when the 6th digit lands — kept out of the setState updater so
+  // it stays pure (and reliable under React's double-invoke).
+  useEffect(() => {
+    if (pin.length !== LOCK_LEN) return;
+    let cancelled = false;
+    setBusy(true);
+    PinLock.verify(pin, lockRec).then((ok) => {
+      if (cancelled) return;
+      setBusy(false);
+      if (ok) { buzz(8); onUnlock(); }
+      else { setErr(true); setPin(""); buzz([10, 40, 10]); setTimeout(() => setErr(false), 500); }
+    });
+    return () => { cancelled = true; };
+  }, [pin]);
+  const push = (d) => { if (!busy) setPin((p) => p.length >= LOCK_LEN ? p : p + d); };
+  const back = () => { if (!busy) setPin((p) => p.slice(0, -1)); };
+  const keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "⌫"];
+  return /* @__PURE__ */ React.createElement("div", { className: "lockgate" },
+    /* @__PURE__ */ React.createElement("div", { className: "lock-brand" }, /* @__PURE__ */ React.createElement(PocketMark, { size: 44 })),
+    /* @__PURE__ */ React.createElement("div", { className: "lock-title" }, "Enter your PIN"),
+    /* @__PURE__ */ React.createElement("div", { className: "lock-sub" }, "Stash is locked to keep your money private."),
+    /* @__PURE__ */ React.createElement("div", { className: "lock-dots" + (err ? " shake" : "") }, Array.from({ length: LOCK_LEN }).map((_, i) => /* @__PURE__ */ React.createElement("span", { key: i, className: "lock-dot" + (i < pin.length ? " on" : "") + (err ? " err" : "") }))),
+    /* @__PURE__ */ React.createElement("div", { className: "lock-pad" }, keys.map((k, i) => k === "" ? /* @__PURE__ */ React.createElement("span", { key: i }) : /* @__PURE__ */ React.createElement("button", { key: i, className: "lock-key" + (k === "⌫" ? " ghost" : ""), onClick: k === "⌫" ? back : () => push(k), disabled: busy, "aria-label": k === "⌫" ? "Delete" : k }, k))),
+    wipe
+      ? /* @__PURE__ */ React.createElement("div", { className: "lock-forgot" }, /* @__PURE__ */ React.createElement("div", { className: "lock-warn" }, "Erase all data and start fresh? This can't be undone."), /* @__PURE__ */ React.createElement("div", { className: "lock-forgot-row" }, /* @__PURE__ */ React.createElement("button", { className: "btn quiet", onClick: () => setWipe(false) }, "Cancel"), /* @__PURE__ */ React.createElement("button", { className: "btn danger-quiet", onClick: onForgot }, "Erase everything")))
+      : /* @__PURE__ */ React.createElement("button", { className: "lock-link", onClick: () => setWipe(true) }, "Forgot PIN?"));
+}
+function LockSetup({ settings, setSetting }) {
+  const rec = settings.lock;
+  const on = !!(rec && rec.enabled);
+  const [mode, setMode] = useState(null);
+  const [cur, setCur] = useState("");
+  const [p1, setP1] = useState("");
+  const [p2, setP2] = useState("");
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+  const reset = () => { setMode(null); setCur(""); setP1(""); setP2(""); setMsg(""); };
+  const okPin = (s) => /^\d{6}$/.test(s);
+  const enable = async () => {
+    if (!okPin(p1)) return setMsg("Choose a 6-digit PIN.");
+    if (p1 !== p2) return setMsg("Those PINs don't match.");
+    setBusy(true); const r = await PinLock.create(p1); setBusy(false);
+    setSetting("lock", r); reset();
+  };
+  const change = async () => {
+    setBusy(true); const ok = await PinLock.verify(cur, rec); setBusy(false);
+    if (!ok) return setMsg("Current PIN is wrong.");
+    if (!okPin(p1)) return setMsg("New PIN must be 6 digits.");
+    if (p1 !== p2) return setMsg("New PINs don't match.");
+    setBusy(true); const r = await PinLock.create(p1); setBusy(false);
+    setSetting("lock", { ...r, autoLockSec: rec.autoLockSec == null ? 30 : rec.autoLockSec }); reset();
+  };
+  const disable = async () => {
+    setBusy(true); const ok = await PinLock.verify(cur, rec); setBusy(false);
+    if (!ok) return setMsg("Wrong PIN.");
+    setSetting("lock", null); reset();
+  };
+  const pinInput = (val, set, ph) => /* @__PURE__ */ React.createElement("input", { className: "full", type: "password", inputMode: "numeric", autoComplete: "off", maxLength: 6, placeholder: ph, value: val, onChange: (e) => { set(e.target.value.replace(/\D/g, "")); setMsg(""); } });
+  const errEl = msg ? /* @__PURE__ */ React.createElement("div", { className: "hint", style: { color: "var(--crit)" } }, msg) : null;
+  if (!on) {
+    return mode === "create"
+      ? /* @__PURE__ */ React.createElement("div", { className: "f-grid" }, pinInput(p1, setP1, "New 6-digit PIN"), pinInput(p2, setP2, "Confirm PIN"), /* @__PURE__ */ React.createElement("button", { className: "save", onClick: enable, disabled: busy }, "Turn on app lock"), /* @__PURE__ */ React.createElement("button", { className: "btn quiet", onClick: reset }, "Cancel"), errEl)
+      : /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "sub", style: { marginTop: 0, marginBottom: 10 } }, "Lock Stash behind a 6-digit PIN so balances stay private if your phone is lost or borrowed."), /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: () => setMode("create") }, "Turn on app lock"));
+  }
+  if (mode === "change") return /* @__PURE__ */ React.createElement("div", { className: "f-grid" }, pinInput(cur, setCur, "Current PIN"), pinInput(p1, setP1, "New PIN"), pinInput(p2, setP2, "Confirm new PIN"), /* @__PURE__ */ React.createElement("button", { className: "save", onClick: change, disabled: busy }, "Save new PIN"), /* @__PURE__ */ React.createElement("button", { className: "btn quiet", onClick: reset }, "Cancel"), errEl);
+  if (mode === "off") return /* @__PURE__ */ React.createElement("div", { className: "f-grid" }, pinInput(cur, setCur, "Enter PIN to turn off"), /* @__PURE__ */ React.createElement("button", { className: "btn danger-quiet", onClick: disable, disabled: busy }, "Turn off app lock"), /* @__PURE__ */ React.createElement("button", { className: "btn quiet", onClick: reset }, "Cancel"), errEl);
+  return /* @__PURE__ */ React.createElement("div", null,
+    /* @__PURE__ */ React.createElement("div", { className: "sub", style: { marginTop: 0 } }, "✓ App lock is on — Stash asks for your PIN when you come back."),
+    /* @__PURE__ */ React.createElement("div", { className: "lock-row" }, /* @__PURE__ */ React.createElement("span", null, "Auto-lock"), /* @__PURE__ */ React.createElement("select", { value: rec.autoLockSec == null ? 30 : rec.autoLockSec, onChange: (e) => setSetting("lock", { ...rec, autoLockSec: +e.target.value }) }, /* @__PURE__ */ React.createElement("option", { value: 0 }, "Immediately"), /* @__PURE__ */ React.createElement("option", { value: 30 }, "After 30s away"), /* @__PURE__ */ React.createElement("option", { value: 60 }, "After 1 min"), /* @__PURE__ */ React.createElement("option", { value: 300 }, "After 5 min"))),
+    /* @__PURE__ */ React.createElement("div", { className: "btn-row", style: { marginTop: 12 } }, /* @__PURE__ */ React.createElement("button", { className: "btn quiet", onClick: () => setMode("change") }, "Change PIN"), /* @__PURE__ */ React.createElement("button", { className: "btn danger-quiet", onClick: () => setMode("off") }, "Turn off")));
+}
 function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, syncInfo, runSync }) {
   const { categories, settings, overrides, sinkingFunds } = data;
+  const lockRec = settings.lock;
+  const [locked, setLocked] = useState(() => !!(lockRec && lockRec.enabled));
+  useEffect(() => {
+    if (!(lockRec && lockRec.enabled)) return;
+    let hiddenAt = null;
+    const onVis = () => {
+      if (document.hidden) hiddenAt = Date.now();
+      else if (hiddenAt != null && Date.now() - hiddenAt >= (lockRec.autoLockSec == null ? 30 : lockRec.autoLockSec) * 1e3) setLocked(true);
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, [lockRec && lockRec.enabled, lockRec && lockRec.autoLockSec]);
   const incomeRaw = data.income;
   const txnsRaw = data.txns;
   // bank-truth mode: once accounts are connected (sfMap exists), spending
@@ -3836,6 +3971,7 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     ["settings", "Settings", "\u2699"]
   ];
   const effTab = simpleMode && (tab === "budget" || tab === "funds") ? "home" : tab;
+  if (locked && lockRec && lockRec.enabled) return /* @__PURE__ */ React.createElement(LockGate, { lockRec, onUnlock: () => setLocked(false), onForgot: () => { try { localStorage.removeItem("budget:v2:data"); localStorage.removeItem("budget:sync:v1"); } catch (e) {} location.reload(); } });
   return /* @__PURE__ */ React.createElement("div", { className: "shell" }, /* @__PURE__ */ React.createElement("header", { className: "top" }, /* @__PURE__ */ React.createElement(LogoMark, null)), month !== CURRENT_MONTH && effTab !== "home" && /* @__PURE__ */ React.createElement("button", { className: "backnow", onClick: () => setMonth(CURRENT_MONTH) }, "Viewing ", monthLabel(month), " \xB7 back to ", monthLabel(CURRENT_MONTH), " \u2192"), /* @__PURE__ */ React.createElement("div", { key: effTab, className: "tab-pane" }, effTab === "home" && (simpleMode ? /* @__PURE__ */ React.createElement(SimpleHome, { ...shared, ...{ setSetting, addTxn, addIncome, openAdd: (init) => { setSheetInit(init); setSheetKind("spend"); setSheetOpen(true); } } }) : /* @__PURE__ */ React.createElement(Home, { ...shared })), effTab === "budget" && /* @__PURE__ */ React.createElement(Budget, { ...shared }), effTab === "activity" && /* @__PURE__ */ React.createElement(
     Activity,
     {
@@ -4972,7 +5108,7 @@ function Settings(p) {
     },
     /* @__PURE__ */ React.createElement("div", { className: "btn-row", style: { marginTop: 0 } }, /* @__PURE__ */ React.createElement("button", { className: "btn quiet", onClick: runCheck }, "Run self-check")),
     check && /* @__PURE__ */ React.createElement("div", { className: "selfcheck" }, check.fail === 0 ? /* @__PURE__ */ React.createElement("span", { className: "tag ok" }, "\u2713 all ", check.pass, " checks passed") : /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("span", { className: "tag over" }, "\u2715 ", check.fail, " failed"), /* @__PURE__ */ React.createElement("div", { className: "fails" }, check.log.filter((l) => l[0] === "fail").map((l) => l[1]).join("\n"))))
-  ), /* @__PURE__ */ React.createElement(Acc, { title: "About" }, /* @__PURE__ */ React.createElement("div", { className: "sub", style: { marginTop: 0 } }, "Stash is a decision-support tool, not licensed financial advice. Money is stored as exact cents; totals are always recomputed from your transactions, never stored."))), (STORE.corrupted || STORE.saveFailed) && /* @__PURE__ */ React.createElement("div", { className: "footnote" }, STORE.corrupted ? "\u26A0 previous save was unreadable \u2014 a backup copy was kept" : "\u26A0 saving to this browser failed \u2014 use Export to keep your data"));
+  ), /* @__PURE__ */ React.createElement(Acc, { title: "App lock", cap: settings.lock && settings.lock.enabled ? "On · 6-digit PIN" : "Off" }, /* @__PURE__ */ React.createElement(LockSetup, { settings, setSetting })), /* @__PURE__ */ React.createElement(Acc, { title: "About" }, /* @__PURE__ */ React.createElement("div", { className: "sub", style: { marginTop: 0 } }, "Stash is a decision-support tool, not licensed financial advice. Money is stored as exact cents; totals are always recomputed from your transactions, never stored."))), (STORE.corrupted || STORE.saveFailed) && /* @__PURE__ */ React.createElement("div", { className: "footnote" }, STORE.corrupted ? "\u26A0 previous save was unreadable \u2014 a backup copy was kept" : "\u26A0 saving to this browser failed \u2014 use Export to keep your data"));
 }
 ReactDOM.createRoot(document.getElementById("root")).render(
   /* @__PURE__ */ React.createElement(Boundary, null, /* @__PURE__ */ React.createElement(App, null))
