@@ -549,15 +549,20 @@ body{background:linear-gradient(180deg,#16413a 0px,#10302b 300px,#0a1614 680px) 
 @keyframes wink-squish{0%,100%{transform:scaleY(1)}50%{transform:scaleY(.15)}}
 .pocket-brand svg{animation:pocket-in .55s cubic-bezier(.34,1.56,.64,1) both}
 @keyframes pocket-in{from{transform:translateY(14px) scale(.6);opacity:0}to{transform:none;opacity:1}}
-/* animated title: word flips Stash(green) <-> Spend(white); ? stays static */
+/* static wordmark: "Stash or spend?" — two-tone, one-time entrance, verdict emphasis */
 .ask-title{line-height:1.15}
-.flipword{display:inline-block;height:1.15em;overflow:hidden;vertical-align:bottom}
-.flip-col{display:flex;flex-direction:column;animation:flip-cycle 4.4s cubic-bezier(.7,0,.3,1) infinite}
-.flip-col > span{height:1.15em;line-height:1.15em;text-align:center;white-space:nowrap}
-.fw-stash{color:var(--accent)}
-.fw-spend{color:var(--ink)}
-.fw-q{color:var(--ink);margin-left:-.07em}
-@keyframes flip-cycle{0%,42%{transform:translateY(0)}50%,92%{transform:translateY(-1.15em)}100%{transform:translateY(0)}}
+.wordmark{display:inline-flex;align-items:baseline;justify-content:center;white-space:nowrap}
+.wm-stash,.wm-spend,.wm-or,.wm-q{display:inline-block;transition:color .35s ease,opacity .35s ease}
+.wm-stash{color:var(--accent);animation:wm-inL .5s cubic-bezier(.34,1.4,.5,1) backwards}
+.wm-spend{color:var(--ink2);animation:wm-inR .5s cubic-bezier(.34,1.4,.5,1) backwards}
+.wm-or{color:var(--muted);font-size:.6em;font-weight:600;margin:0 .34em;letter-spacing:.03em;animation:wm-fade .5s .12s ease both}
+.wm-q{color:var(--ink);animation:wm-fade .5s .12s ease both}
+@keyframes wm-inL{from{transform:translateX(-8px);opacity:0}to{transform:none;opacity:1}}
+@keyframes wm-inR{from{transform:translateX(8px);opacity:0}to{transform:none;opacity:1}}
+@keyframes wm-fade{from{opacity:0}to{opacity:1}}
+.wm-stash.wm-win,.wm-spend.wm-win{color:var(--accent);animation:wm-pop .45s cubic-bezier(.34,1.56,.64,1)}
+.wm-stash.wm-dim,.wm-spend.wm-dim{color:var(--muted);opacity:.5}
+@keyframes wm-pop{0%{transform:scale(1)}42%{transform:scale(1.13)}100%{transform:scale(1)}}
 .ask-q{color:var(--ink);margin-left:-.07em}
 /* your-call coin flip (AMBER verdict) */
 .stage-wrap.coin{width:50px;height:50px}
@@ -625,7 +630,7 @@ body{background:linear-gradient(180deg,#16413a 0px,#10302b 300px,#0a1614 680px) 
 @media (prefers-reduced-motion: reduce){
   .val-pulse,.meter > i,.sheet,.sheet-bg,.fan-item,.tab-pane,.nc-bar,.anim-bill,.anim-card,.verdict,.pocket-brand svg,.anim-coin{animation:none}
   .ty,.wink{animation:none;opacity:1}
-  .flip-col{animation:none;transform:none}
+  .wm-stash,.wm-spend,.wm-or,.wm-q{animation:none;transform:none;opacity:1}
   .swipe-cell .bubble{transition:none;transform:none;opacity:1}
   .jar-liq{transition:none}
 }
@@ -2886,8 +2891,11 @@ function SwipeAnim() {
 }
 // Stash pocket brand mark: jeans pocket, mint stitching, a bill peeking out
 // title word flips between Stash (green) and Spend (white), ? stays static
-function FlipWord() {
-  return /* @__PURE__ */ React.createElement("span", { className: "flipword", "aria-label": "Stash or spend?" }, /* @__PURE__ */ React.createElement("span", { className: "flip-col" }, /* @__PURE__ */ React.createElement("span", { className: "fw-stash" }, "Stash", /* @__PURE__ */ React.createElement("span", { className: "fw-q" }, "?")), /* @__PURE__ */ React.createElement("span", { className: "fw-spend" }, "Spend", /* @__PURE__ */ React.createElement("span", { className: "fw-q" }, "?"))));
+function FlipWord(props) {
+  var verdict = props && props.verdict;
+  var stashCls = "wm-stash" + (verdict === "RED" ? " wm-win" : verdict === "GREEN" ? " wm-dim" : "");
+  var spendCls = "wm-spend" + (verdict === "GREEN" ? " wm-win" : verdict === "RED" ? " wm-dim" : "");
+  return /* @__PURE__ */ React.createElement("span", { className: "wordmark", "aria-label": "Stash or spend?" }, /* @__PURE__ */ React.createElement("span", { className: stashCls }, "Stash"), /* @__PURE__ */ React.createElement("span", { className: "wm-or" }, "or"), /* @__PURE__ */ React.createElement("span", { className: spendCls }, "spend"), /* @__PURE__ */ React.createElement("span", { className: "wm-q" }, "?"));
 }
 // "your call" coin flip — AMBER verdict theater
 function CoinAnim() {
@@ -4080,7 +4088,7 @@ function SimpleHome(p) {
       onClick: () => p.setTab("settings")
     },
     "Set your balance in Settings \u2192"
-  )), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "Left over \xB7 ", monthLabel(month)), /* @__PURE__ */ React.createElement("div", { className: "jarhero" }, /* @__PURE__ */ React.createElement(AnimatedFmt0, { cents: monthNet, className: "bank-val" + (monthNet < 0 ? " overspent" : "") }), /* @__PURE__ */ React.createElement(Jar, { level: leftLevel, size: 30, tint: monthNet < 0 ? "var(--crit)" : void 0, tid: "left" })), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, fmt0(monthIncomeC), " in \xB7 ", fmt0(outC), " out", savedMTD > 0 ? " \xB7 " + fmt0(savedMTD) + " saved" : ""), perDay != null && /* @__PURE__ */ React.createElement("div", { className: "perday" }, "\u2248 ", money(perDay), "/day \xB7 ", daysLeft, "d left")), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "On pace \xB7 ", monthLabel(month)), projectedEnd != null ? /* @__PURE__ */ React.createElement(AnimatedFmt0, { cents: projectedEnd, plus: true, className: "bank-val" + (projectedEnd < 0 ? " overspent" : "") }) : /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "bank-val", style: { opacity: 0.5 } }, "\u2014"), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, "a few days of spending and this shows where ", monthLabel(month), " is headed")))), /* @__PURE__ */ React.createElement("section", { className: "card center ask-card" + (v ? " open" : "") }, /* @__PURE__ */ React.createElement("div", { className: "eyebrow ask-title" }, /* @__PURE__ */ React.createElement(FlipWord, null), /* @__PURE__ */ React.createElement("button", { className: "info-i", "aria-label": "How this works", onClick: () => setHelpOpen(!helpOpen) }, "i")), helpOpen && /* @__PURE__ */ React.createElement("div", { className: "ask-help" }, "Type a price and pick its category — needs get more slack than fun. Stash checks it against your bank and goals, then answers."), /* @__PURE__ */ React.createElement("div", { className: "ask-wrap", onClick: () => { if (askRef.current) askRef.current.focus(); } }, /* @__PURE__ */ React.createElement("span", { className: "ask-ghost" }, "$", amt ? "" : "0"), /* @__PURE__ */ React.createElement("input", {
+  )), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "Left over \xB7 ", monthLabel(month)), /* @__PURE__ */ React.createElement("div", { className: "jarhero" }, /* @__PURE__ */ React.createElement(AnimatedFmt0, { cents: monthNet, className: "bank-val" + (monthNet < 0 ? " overspent" : "") }), /* @__PURE__ */ React.createElement(Jar, { level: leftLevel, size: 30, tint: monthNet < 0 ? "var(--crit)" : void 0, tid: "left" })), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, fmt0(monthIncomeC), " in \xB7 ", fmt0(outC), " out", savedMTD > 0 ? " \xB7 " + fmt0(savedMTD) + " saved" : ""), perDay != null && /* @__PURE__ */ React.createElement("div", { className: "perday" }, "\u2248 ", money(perDay), "/day \xB7 ", daysLeft, "d left")), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "On pace \xB7 ", monthLabel(month)), projectedEnd != null ? /* @__PURE__ */ React.createElement(AnimatedFmt0, { cents: projectedEnd, plus: true, className: "bank-val" + (projectedEnd < 0 ? " overspent" : "") }) : /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "bank-val", style: { opacity: 0.5 } }, "\u2014"), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, "a few days of spending and this shows where ", monthLabel(month), " is headed")))), /* @__PURE__ */ React.createElement("section", { className: "card center ask-card" + (v ? " open" : "") }, /* @__PURE__ */ React.createElement("div", { className: "eyebrow ask-title" }, /* @__PURE__ */ React.createElement(FlipWord, { verdict: v && v.verdict }), /* @__PURE__ */ React.createElement("button", { className: "info-i", "aria-label": "How this works", onClick: () => setHelpOpen(!helpOpen) }, "i")), helpOpen && /* @__PURE__ */ React.createElement("div", { className: "ask-help" }, "Type a price and pick its category — needs get more slack than fun. Stash checks it against your bank and goals, then answers."), /* @__PURE__ */ React.createElement("div", { className: "ask-wrap", onClick: () => { if (askRef.current) askRef.current.focus(); } }, /* @__PURE__ */ React.createElement("span", { className: "ask-ghost" }, "$", amt ? "" : "0"), /* @__PURE__ */ React.createElement("input", {
     ref: askRef,
     className: "ask-input",
     type: "text",
