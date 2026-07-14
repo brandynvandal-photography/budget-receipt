@@ -1493,11 +1493,57 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
   } catch (e) { backend = null; }
 
   var corrupted = false, saveFailed = false;
+
+  // ---------- IndexedDB: a durable backup that survives localStorage eviction.
+  // localStorage stays the fast, synchronous primary; every save also mirrors
+  // to IDB, and load() recovers from IDB when localStorage is gone or corrupt.
+  // All IDB ops are best-effort — a browser without it behaves exactly as
+  // before (localStorage + memory).
+  var IDB_DB = "stash", IDB_STORE = "kv", IDB_KEY = "data", idbReady = null;
+  function idbOpen() {
+    if (idbReady) return idbReady;
+    idbReady = new Promise(function (resolve) {
+      try {
+        if (!root.indexedDB) return resolve(null);
+        var req = root.indexedDB.open(IDB_DB, 1);
+        req.onupgradeneeded = function () { try { req.result.createObjectStore(IDB_STORE); } catch (e) {} };
+        req.onsuccess = function () { resolve(req.result); };
+        req.onerror = function () { resolve(null); };
+        req.onblocked = function () { resolve(null); };
+      } catch (e) { resolve(null); }
+    });
+    return idbReady;
+  }
+  function idbGet() {
+    return idbOpen().then(function (db) {
+      if (!db) return void 0;
+      return new Promise(function (resolve) {
+        try {
+          var rq = db.transaction(IDB_STORE, "readonly").objectStore(IDB_STORE).get(IDB_KEY);
+          rq.onsuccess = function () { resolve(rq.result); };
+          rq.onerror = function () { resolve(void 0); };
+        } catch (e) { resolve(void 0); }
+      });
+    }).catch(function () { return void 0; });
+  }
+  function idbSet(val) {
+    return idbOpen().then(function (db) {
+      if (!db) return;
+      return new Promise(function (resolve) {
+        try {
+          var tx = db.transaction(IDB_STORE, "readwrite");
+          tx.objectStore(IDB_STORE).put(val, IDB_KEY);
+          tx.oncomplete = function () { resolve(); };
+          tx.onerror = function () { resolve(); };
+          tx.onabort = function () { resolve(); };
+        } catch (e) { resolve(); }
+      });
+    }).catch(function () {});
+  }
+
   // A write can start failing after boot (quota exceeded, private mode). When
   // it does we must fall over to the in-memory backend so that load() reads
-  // the same place save() writes — otherwise the write is silently lost AND
-  // the next load reads a stale localStorage blob. We also downgrade the
-  // label so the footer stops promising "saved in this browser".
+  // the same place save() writes. IndexedDB keeps working as the durable copy.
   function degradeToMemory(data) {
     backend = null;
     mem = data;
@@ -1510,23 +1556,38 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
     get saveFailed() { return saveFailed; },
     load: function () {
       return new Promise(function (resolve) {
-        if (!backend) return resolve(mem);
-        var raw = null;
-        try { raw = backend.getItem(KEY); } catch (e) { return resolve(mem); }
-        if (raw == null) return resolve(mem);
-        try {
-          resolve(JSON.parse(raw));
-        } catch (e) {
-          // never destroy: snapshot the unreadable blob, then fall back
-          try { backend.setItem(KEY + ".bak", raw); } catch (e2) {}
-          corrupted = true;
-          resolve(null);
+        // 1) localStorage is authoritative when present (fast + always current)
+        if (backend) {
+          var raw = null;
+          try { raw = backend.getItem(KEY); } catch (e) { raw = null; }
+          if (raw != null) {
+            var parsed = void 0;
+            try { parsed = JSON.parse(raw); }
+            catch (e) { try { backend.setItem(KEY + ".bak", raw); } catch (e2) {} corrupted = true; }
+            if (parsed !== void 0) {
+              mem = parsed;
+              idbSet(parsed);              // keep the durable backup fresh
+              return resolve(parsed);
+            }
+          }
         }
+        // 2) localStorage empty (evicted), corrupt, or unavailable -> recover
+        //    from the IndexedDB backup, then restore the fast localStorage copy
+        idbGet().then(function (fromIdb) {
+          if (fromIdb != null) {
+            mem = fromIdb;
+            corrupted = false;
+            try { if (backend) backend.setItem(KEY, JSON.stringify(fromIdb)); } catch (e) {}
+            return resolve(fromIdb);
+          }
+          resolve(mem);
+        }).catch(function () { resolve(mem); });
       });
     },
     save: function (data) {
       // keep the latest in memory regardless, so a later read is never stale
       mem = data;
+      idbSet(data);                        // durable backup, async + best-effort
       if (!backend) return;
       try {
         backend.setItem(KEY, JSON.stringify(data));
