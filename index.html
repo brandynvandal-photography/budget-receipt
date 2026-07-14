@@ -1343,6 +1343,14 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
         return done("AMBER", "dent");
       }
     }
+    // discretionary restraint: a want that eats a big slice of your spendable
+    // cash earns a "your call", even when the month math allows it. Fun (0.7)
+    // trips sooner than General (0.9); needs (L>=1) skip this entirely. Not a
+    // block — just a nudge to sit with a large discretionary buy.
+    if (L < 1 && x.bank != null) {
+      var spendable = x.bank - floor;
+      if (spendable > 0 && amount > spendable * 0.4 * L) return done("AMBER", "want");
+    }
     // future outlook: the month can look fine while the BANK slips under
     // what next month's bills need — warn before the float breaks
     if (!isEmergency && x.bank != null && x.billsMonthly > 0 && x.bank - amount < x.billsMonthly) {
@@ -2429,6 +2437,14 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
       C.simpleVerdict(C.c(150), C.c(1000), C.c(800), C.c(40), 2).verdict, "GREEN");
     eq("emergency clears an amber that fun would trip",
       C.simpleVerdict(C.c(150), C.c(1000), C.c(800), C.c(40), 3).verdict, "GREEN");
+    eq("big fun buy vs bank => AMBER/want (600 on 1500)",
+      C.simpleVerdict(C.c(600), C.c(3000), C.c(2500), C.c(80), 0.7, { bank: C.c(1500), floor: 0 }).reason, "want");
+    eq("modest fun buy vs bank is not a want (100 on 1500)",
+      C.simpleVerdict(C.c(100), C.c(3000), C.c(2500), C.c(80), 0.7, { bank: C.c(1500), floor: 0 }).reason !== "want", true);
+    eq("general is looser than fun on the want nudge (500 on 1500)",
+      C.simpleVerdict(C.c(500), C.c(3000), C.c(2500), C.c(80), 0.9, { bank: C.c(1500), floor: 0 }).reason !== "want", true);
+    eq("a need (food) never trips the want nudge",
+      C.simpleVerdict(C.c(600), C.c(3000), C.c(2500), C.c(80), 2, { bank: C.c(1500), floor: 0 }).reason !== "want", true);
     ok("leniency never overrides a hard RED (no money left)",
       C.simpleVerdict(C.c(1200), C.c(1000), C.c(800), C.c(40), 3).verdict === "RED");
     eq("food bucket maps to 2x leniency", C.bucketLeniency("food"), 2);
@@ -4054,6 +4070,11 @@ function SimpleHome(p) {
       ic: "\u25B3",
       head: "Your call.",
       sub: "That's " + (perDay ? Math.round(cents / perDay) : 0) + " days of budget in one go \u2014 about " + money(perDay || 0) + "/day is left."
+    },
+    want: {
+      ic: "\u25b3",
+      head: "Your call.",
+      sub: "That's a big bite of your cash for a want \u2014 you'd have " + money(v.bankAfter || 0) + " left in the bank."
     },
     ok: {
       ic: "\u2713",
