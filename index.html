@@ -2377,7 +2377,7 @@ const { useState, useEffect, useMemo, useCallback, useRef, Component } = React;
 const C = window.BudgetCore;
 const SEED = window.BudgetSeed;
 const STORE = window.BudgetStorage;
-const SCHEMA_VERSION = 9;
+const SCHEMA_VERSION = 10;
 const MIGRATIONS = [
   function v1_to_v2(data) {
     if (!data.sinkingFunds) data.sinkingFunds = JSON.parse(JSON.stringify(SEED.sinkingFunds));
@@ -2446,6 +2446,15 @@ const MIGRATIONS = [
     if (bc) bc.class = "BILL";
     else if (data.categories) data.categories.push({ id: "bills", name: "Bills", class: "BILL", carryover: "STRICT", icon: "\u{1F4C4}" });
     data.schemaVersion = 9;
+  },
+  function v9_to_v10(data) {
+    // "General" catch-all label for miscellaneous spending. Discretionary
+    // (WANT class), so it never feeds NEED-burn / runway — tagging just
+    // organizes it in Trends. Numbers are unaffected.
+    if (data.categories && !data.categories.some((c) => c.id === "gen")) {
+      data.categories.push({ id: "gen", name: "General", class: "WANT", carryover: "STRICT", icon: "\u{1F6CD}️" });
+    }
+    data.schemaVersion = 10;
   }
 ];
 const SYNC_KEY = "budget:sync:v1";
