@@ -307,9 +307,11 @@ body{background:linear-gradient(180deg,#16413a 0px,#10302b 300px,#0a1614 680px) 
 .logo{position:relative;display:inline-block;isolation:isolate;font-size:36px;font-weight:800;letter-spacing:-.02em;text-transform:lowercase;color:var(--ink)}
 .logo::after{content:".";color:var(--accent)}
 .logo-word{position:relative}
-.logo-jar{position:absolute;left:50%;top:50%;height:1.5em;width:auto;z-index:-1;
-  transform:translate(-45%,-50%) skewX(-8deg);opacity:.34;filter:blur(.3px);pointer-events:none}
-.logo-jar rect{fill:var(--accent)}
+.logo-jar{position:absolute;left:50%;top:50%;height:1.62em;width:auto;z-index:-1;
+  transform:translate(-45%,-50%) skewX(-8deg);opacity:.32;
+  filter:blur(.55px) drop-shadow(0 1px 1.5px rgba(69,224,166,.4));
+  pointer-events:none}
+.logo-jar .lj-lid,.logo-jar .lj-body{fill:var(--accent)}
 .bankish .card{background:transparent;box-shadow:none;border-radius:0;padding:6px 0;margin-bottom:26px}
 .center{text-align:left}
 .bank-hero{text-align:left;padding:14px 0 6px}
@@ -2911,7 +2913,7 @@ function TypeOn({ text }) {
 // squirreling money into a jar. The jar is a flat silhouette, skewed and
 // theme-toned so it reads as a shadow the word throws, not a separate icon.
 function LogoMark() {
-  return /* @__PURE__ */ React.createElement("div", { className: "logo" }, /* @__PURE__ */ React.createElement("svg", { className: "logo-jar", viewBox: "0 0 34 48", "aria-hidden": true }, /* @__PURE__ */ React.createElement("rect", { x: 8, y: 2.5, width: 18, height: 6, rx: 2.2 }), /* @__PURE__ */ React.createElement("rect", { x: 10.5, y: 7.5, width: 13, height: 5 }), /* @__PURE__ */ React.createElement("rect", { x: 4.5, y: 11, width: 25, height: 33, rx: 6.5 })), /* @__PURE__ */ React.createElement("span", { className: "logo-word" }, "Stash"));
+  return /* @__PURE__ */ React.createElement("div", { className: "logo" }, /* @__PURE__ */ React.createElement("svg", { className: "logo-jar", viewBox: "0 0 40 54", "aria-hidden": true }, /* @__PURE__ */ React.createElement("rect", { className: "lj-lid", x: 8.5, y: 2, width: 23, height: 7.4, rx: 2.7 }), /* @__PURE__ */ React.createElement("path", { className: "lj-body", d: "M13 9.4 H27 V13.8 C31 14.8 34.6 17.4 34.6 22 V46.8 C34.6 50.6 32 52 28.4 52 H11.6 C8 52 5.4 50.6 5.4 46.8 V22 C5.4 17.4 9 14.8 13 13.8 Z" })), /* @__PURE__ */ React.createElement("span", { className: "logo-word" }, "Stash"));
 }
 function PocketMark({ size }) {
   const w = size || 30;
