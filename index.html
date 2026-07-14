@@ -447,6 +447,11 @@ body{background:linear-gradient(180deg,#16413a 0px,#10302b 300px,#0a1614 680px) 
 .quickamt{border:1px solid var(--grid);background:transparent;color:var(--ink2);border-radius:999px;
   padding:6px 14px;font-size:13.5px;font-weight:600;cursor:pointer;transition:transform .12s ease}
 .quickamt:active{transform:scale(.96)}
+/* spend row with inline category on its own line */
+.txrow-2line{flex-direction:column;align-items:stretch;gap:8px}
+.txrow-2line .txrow-line{display:flex;align-items:center;gap:10px}
+.txrow-2line .tx-date{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.txrow-2line .catpick{max-width:none;width:100%}
 /* Activity search + sort bar */
 .actbar{display:flex;gap:8px;margin-bottom:12px}
 .actsearch{flex:1;min-width:0;border:1px solid var(--grid);border-radius:11px;padding:10px 12px;
@@ -4211,8 +4216,8 @@ function Activity(p) {
     const manualRows = uncatFirst.filter((t) => !isBill(t));
     const sum = (l) => l.reduce((s, t) => s + t.amount, 0);
     const spendRow = (t) => {
-      const un = !simpleMode && t.categoryId == null;
-      return /* @__PURE__ */ React.createElement(SwipeRow, { key: t.id, onDelete: () => deleteTxn(t.id), className: "txrow" + (un ? " uncat" : "") }, /* @__PURE__ */ React.createElement("div", { className: "rowic" }, isBill(t) ? "\u25F7" : "$"),/* @__PURE__ */ React.createElement("div", { className: "tx-main", onClick: () => setEditing({ kind: "txn", entry: t }), style: { cursor: "pointer" } }, /* @__PURE__ */ React.createElement("div", { className: "tx-merch" }, t.merchant || "Unnamed"), /* @__PURE__ */ React.createElement("div", { className: "tx-date" }, monthShort(C.monthOf(t.date)), " ", +t.date.slice(8, 10), t.amount < 0 ? " \xB7 refund" : "", " \xB7 tap to edit")), /* @__PURE__ */ React.createElement("span", { className: "tx-amt" + (t.amount < 0 ? " refund" : "") }, t.amount < 0 ? "+" + money(-t.amount) : money(t.amount)), !simpleMode && /* @__PURE__ */ React.createElement(
+      const un = t.categoryId == null;
+      return /* @__PURE__ */ React.createElement(SwipeRow, { key: t.id, onDelete: () => deleteTxn(t.id), className: "txrow txrow-2line" + (un ? " uncat" : "") }, /* @__PURE__ */ React.createElement("div", { className: "txrow-line" }, /* @__PURE__ */ React.createElement("div", { className: "rowic" }, isBill(t) ? "\u25F7" : "$"), /* @__PURE__ */ React.createElement("div", { className: "tx-main", onClick: () => setEditing({ kind: "txn", entry: t }), style: { cursor: "pointer" } }, /* @__PURE__ */ React.createElement("div", { className: "tx-merch" }, t.merchant || "Unnamed"), /* @__PURE__ */ React.createElement("div", { className: "tx-date" }, monthShort(C.monthOf(t.date)), " ", +t.date.slice(8, 10), t.amount < 0 ? " \xB7 refund" : "", " \xB7 tap to edit")), /* @__PURE__ */ React.createElement("span", { className: "tx-amt" + (t.amount < 0 ? " refund" : "") }, t.amount < 0 ? "+" + money(-t.amount) : money(t.amount)), /* @__PURE__ */ React.createElement(DeleteX, { onDelete: () => deleteTxn(t.id) })), /* @__PURE__ */ React.createElement(
         "select",
         {
           className: "catpick",
@@ -4221,7 +4226,7 @@ function Activity(p) {
           "aria-label": "Category"
         },
         opts
-      ), /* @__PURE__ */ React.createElement(DeleteX, { onDelete: () => deleteTxn(t.id) }));
+      ));
     };
     if (uncatFirst.length === 0) return /* @__PURE__ */ React.createElement("section", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "empty" }, /* @__PURE__ */ React.createElement("span", { className: "e-ic" }, "\u{1F9FE}"), "Nothing logged", showAll ? "" : " in " + monthLabel(month), " yet.", /* @__PURE__ */ React.createElement("br", null), "Tap + to add your first expense."));
     return /* @__PURE__ */ React.createElement("section", { className: "card" }, uncatFirst.map(spendRow));
