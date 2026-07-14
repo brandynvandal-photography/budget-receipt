@@ -2,14 +2,14 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-title" content="Stash" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="theme-color" content="#16413a" />
 <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png" />
 <link rel="icon" type="image/png" href="apple-touch-icon.png" />
-
+<link rel="manifest" href="manifest.webmanifest" />
 <meta name="robots" content="noindex" />
 <title>Stash</title>
 <style>
@@ -638,6 +638,8 @@ body{background:linear-gradient(180deg,#16413a 0px,#10302b 300px,#0a1614 680px) 
   .jar-liq{transition:none}
 }
 
+.sw-update{position:fixed;left:50%;bottom:calc(84px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:9999;display:flex;align-items:center;gap:12px;background:var(--page);border:1px solid var(--ring);border-radius:12px;padding:9px 10px 9px 15px;box-shadow:0 14px 36px rgba(0,0,0,.45);font-size:14px;font-weight:600;color:var(--ink)}
+.sw-update button{background:var(--accent);color:#08130f;border:none;border-radius:9px;padding:8px 15px;font-weight:700;font-size:13.5px;cursor:pointer}
 </style>
 </head>
 <body>
@@ -4974,6 +4976,40 @@ ReactDOM.createRoot(document.getElementById("root")).render(
   /* @__PURE__ */ React.createElement(Boundary, null, /* @__PURE__ */ React.createElement(App, null))
 );
 
+</script>
+<script>
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", function () {
+    navigator.serviceWorker.register("sw.js").then(function (reg) {
+      function offerUpdate(worker) {
+        if (document.querySelector(".sw-update")) return;
+        var bar = document.createElement("div");
+        bar.className = "sw-update";
+        var span = document.createElement("span");
+        span.textContent = "New version ready";
+        var btn = document.createElement("button");
+        btn.textContent = "Refresh";
+        btn.onclick = function () { worker.postMessage("SKIP_WAITING"); };
+        bar.appendChild(span);
+        bar.appendChild(btn);
+        document.body.appendChild(bar);
+      }
+      reg.addEventListener("updatefound", function () {
+        var nw = reg.installing;
+        if (!nw) return;
+        nw.addEventListener("statechange", function () {
+          if (nw.state === "installed" && navigator.serviceWorker.controller) offerUpdate(nw);
+        });
+      });
+    }).catch(function () {});
+    var reloading = false;
+    navigator.serviceWorker.addEventListener("controllerchange", function () {
+      if (reloading) return;
+      reloading = true;
+      window.location.reload();
+    });
+  });
+}
 </script>
 </body>
 </html>
