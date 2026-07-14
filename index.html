@@ -3276,6 +3276,12 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     const deadIn = (data.deleted || {}).income || [];
     const now = Date.now();
     const addT = [], addI = [];
+    // this month's materialized bills not yet matched to a real withdrawal
+    // (still sitting on the 1st) — largest first, so each aligns to the day
+    // its payment actually cleared the balance
+    const firstDay = CURRENT_MONTH + "-01";
+    const openBills = txnsRaw.filter((t) => String(t.id).startsWith("recbill-") && t.date === firstDay && !t._matched).map((t) => ({ id: t.id, amt: Math.abs(t.amount) })).sort((a, b) => b.amt - a.amt);
+    const claimedBill = {}, billUpdates = {};
     for (let k = 1; k < days.length; k++) {
       const day = days[k], prev = days[k - 1];
       if (day >= TODAY) continue;
@@ -3286,11 +3292,19 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
       const delta = hist[day].bank - hist[prev].bank;
       const dayInfo = byDay[day] || { merch: [], inflow: 0 };
       if (delta < 0) {
-        // both truths: whatever you've already logged that day (manual
-        // entries, imported rows, materialized bills) explains part of the
-        // balance drop — derived spending fills ONLY the remainder
-        const explained = txnsRaw.reduce((s, t) => !t.isTransfer && t.date === day && !String(t.id).startsWith("sf-d-") ? s + t.amount : s, 0);
-        const spendC = Math.max(0, -delta - dayInfo.inflow - explained);
+        // both truths: whatever's already logged that day explains part of
+        // the drop; then match any open bills to THIS withdrawal day so a
+        // bill and its bank withdrawal never double-count
+        const explained = txnsRaw.reduce((s, t) => !t.isTransfer && t.date === day && !String(t.id).startsWith("sf-d-") && !(String(t.id).startsWith("recbill-") && t.date === firstDay) ? s + Math.abs(t.amount) : s, 0);
+        let remaining = Math.max(0, -delta - dayInfo.inflow - explained);
+        openBills.forEach((bl) => {
+          if (!claimedBill[bl.id] && bl.amt <= remaining + 200) {
+            claimedBill[bl.id] = 1;
+            billUpdates[bl.id] = day;
+            remaining = Math.max(0, remaining - bl.amt);
+          }
+        });
+        const spendC = remaining;
         if (!spendC) continue;
         if (dayInfo.merch.length) {
           const per = Math.floor(spendC / dayInfo.merch.length);
@@ -3306,8 +3320,8 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
         addI.push({ id: iid, date: day, amount: delta + dayInfo.inflow, source: "Deposit (bank)", _m: now });
       }
     }
-    if (!addT.length && !addI.length) return;
-    setData((d) => ({ ...d, txns: [...d.txns, ...addT], income: [...d.income, ...addI] }));
+    if (!addT.length && !addI.length && !Object.keys(billUpdates).length) return;
+    setData((d) => ({ ...d, txns: [...d.txns.map((t) => billUpdates[t.id] ? { ...t, date: billUpdates[t.id], _matched: 1 } : t), ...addT], income: [...d.income, ...addI] }));
   }, [data.sfHist, inbox, txnsRaw, incomeRaw, data.sfMap, categories, merchantMap, setData]);
   const importInbox = (chosen, dismissedIds, mapping) => setData((d) => {
     const txns2 = [...d.txns], income2 = [...d.income];
