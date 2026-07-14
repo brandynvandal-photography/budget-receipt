@@ -3561,10 +3561,14 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     if (o && o[catId] != null) return o[catId];
     return suggestions.alloc[catId] || 0;
   }, [overrides, month, suggestions]);
-  const monthIncomeC = C.monthIncome(income, month);
-  const monthSpendC = C.monthSpend(txns, month);
+  // Home is a "now" screen: it always reflects the CURRENT month, even if a
+  // past month is selected in Trends/Activity (those tabs keep their selection).
+  const homeActive = tab === "home" || (simpleMode && (tab === "budget" || tab === "funds"));
+  const effMonth = homeActive ? CURRENT_MONTH : month;
+  const monthIncomeC = C.monthIncome(income, effMonth);
+  const monthSpendC = C.monthSpend(txns, effMonth);
   const monthNet = monthIncomeC - monthSpendC;
-  const uncat = C.uncategorizedTotal(txns, month);
+  const uncat = C.uncategorizedTotal(txns, effMonth);
   const plannedTotal = categories.reduce((s, cat) => s + planned(cat.id), 0);
   const unassigned = baseline.value - plannedTotal;
   const setPlanned = (catId, str) => {
@@ -3789,7 +3793,7 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     income,
     settings,
     sinkingFunds,
-    month,
+    month: effMonth,
     setMonth,
     savedTotal,
     totalCushion,
