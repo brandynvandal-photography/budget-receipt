@@ -662,6 +662,9 @@ body{background:linear-gradient(180deg,#16413a 0px,#10302b 300px,#0a1614 680px) 
 .lock-forgot-row{display:flex;gap:10px;justify-content:center}
 .lock-row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:10px;font-size:14px;color:var(--ink)}
 .lock-row select{border:1px solid var(--ring);border-radius:9px;padding:8px 10px;background:var(--page);color:var(--ink);font-size:14px}
+.lock-setup{display:flex;flex-direction:column;gap:10px;margin-top:2px}
+.lock-setup .lk-input{width:100%;border:1px solid var(--ring);border-radius:10px;padding:12px;background:var(--page);color:var(--ink);font-size:15px;-webkit-text-security:disc}
+.lock-setup .btn{width:100%;justify-content:center}
 @media (prefers-reduced-motion:reduce){.lock-dots.shake{animation:none}.lock-key:active{transform:none}}
 .onboard{position:fixed;inset:0;z-index:9500;background:var(--page);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;padding:44px 24px calc(32px + env(safe-area-inset-bottom,0px));overflow-y:auto}
 .ob-dots{display:flex;gap:8px}
@@ -3312,15 +3315,15 @@ function LockSetup({ settings, setSetting }) {
     if (!ok) return setMsg("Wrong PIN.");
     setSetting("lock", null); reset();
   };
-  const pinInput = (val, set, ph) => /* @__PURE__ */ React.createElement("input", { className: "full", type: "password", inputMode: "numeric", autoComplete: "off", maxLength: 6, placeholder: ph, value: val, onChange: (e) => { set(e.target.value.replace(/\D/g, "")); setMsg(""); } });
+  const pinInput = (val, set, ph) => /* @__PURE__ */ React.createElement("input", { className: "lk-input", type: "password", inputMode: "numeric", autoComplete: "off", maxLength: 6, placeholder: ph, value: val, onChange: (e) => { set(e.target.value.replace(/\D/g, "")); setMsg(""); } });
   const errEl = msg ? /* @__PURE__ */ React.createElement("div", { className: "hint", style: { color: "var(--crit)" } }, msg) : null;
   if (!on) {
     return mode === "create"
-      ? /* @__PURE__ */ React.createElement("div", { className: "f-grid" }, pinInput(p1, setP1, "New 6-digit PIN"), pinInput(p2, setP2, "Confirm PIN"), /* @__PURE__ */ React.createElement("button", { className: "save", onClick: enable, disabled: busy }, "Turn on app lock"), /* @__PURE__ */ React.createElement("button", { className: "btn quiet", onClick: reset }, "Cancel"), errEl)
+      ? /* @__PURE__ */ React.createElement("div", { className: "lock-setup" }, pinInput(p1, setP1, "New 6-digit PIN"), pinInput(p2, setP2, "Confirm PIN"), /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: enable, disabled: busy }, "Turn on app lock"), /* @__PURE__ */ React.createElement("button", { className: "btn quiet", onClick: reset }, "Cancel"), errEl)
       : /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "sub", style: { marginTop: 0, marginBottom: 10 } }, "Lock Stash behind a 6-digit PIN so balances stay private if your phone is lost or borrowed."), /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: () => setMode("create") }, "Turn on app lock"));
   }
-  if (mode === "change") return /* @__PURE__ */ React.createElement("div", { className: "f-grid" }, pinInput(cur, setCur, "Current PIN"), pinInput(p1, setP1, "New PIN"), pinInput(p2, setP2, "Confirm new PIN"), /* @__PURE__ */ React.createElement("button", { className: "save", onClick: change, disabled: busy }, "Save new PIN"), /* @__PURE__ */ React.createElement("button", { className: "btn quiet", onClick: reset }, "Cancel"), errEl);
-  if (mode === "off") return /* @__PURE__ */ React.createElement("div", { className: "f-grid" }, pinInput(cur, setCur, "Enter PIN to turn off"), /* @__PURE__ */ React.createElement("button", { className: "btn danger-quiet", onClick: disable, disabled: busy }, "Turn off app lock"), /* @__PURE__ */ React.createElement("button", { className: "btn quiet", onClick: reset }, "Cancel"), errEl);
+  if (mode === "change") return /* @__PURE__ */ React.createElement("div", { className: "lock-setup" }, pinInput(cur, setCur, "Current PIN"), pinInput(p1, setP1, "New PIN"), pinInput(p2, setP2, "Confirm new PIN"), /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: change, disabled: busy }, "Save new PIN"), /* @__PURE__ */ React.createElement("button", { className: "btn quiet", onClick: reset }, "Cancel"), errEl);
+  if (mode === "off") return /* @__PURE__ */ React.createElement("div", { className: "lock-setup" }, pinInput(cur, setCur, "Enter PIN to turn off"), /* @__PURE__ */ React.createElement("button", { className: "btn danger-quiet", onClick: disable, disabled: busy }, "Turn off app lock"), /* @__PURE__ */ React.createElement("button", { className: "btn quiet", onClick: reset }, "Cancel"), errEl);
   return /* @__PURE__ */ React.createElement("div", null,
     /* @__PURE__ */ React.createElement("div", { className: "sub", style: { marginTop: 0 } }, "✓ App lock is on — Stash asks for your PIN when you come back."),
     /* @__PURE__ */ React.createElement("div", { className: "lock-row" }, /* @__PURE__ */ React.createElement("span", null, "Auto-lock"), /* @__PURE__ */ React.createElement("select", { value: rec.autoLockSec == null ? 30 : rec.autoLockSec, onChange: (e) => setSetting("lock", { ...rec, autoLockSec: +e.target.value }) }, /* @__PURE__ */ React.createElement("option", { value: 0 }, "Immediately"), /* @__PURE__ */ React.createElement("option", { value: 30 }, "After 30s away"), /* @__PURE__ */ React.createElement("option", { value: 60 }, "After 1 min"), /* @__PURE__ */ React.createElement("option", { value: 300 }, "After 5 min"))),
@@ -5262,7 +5265,7 @@ function Settings(p) {
       }
     }
   )), /* @__PURE__ */ React.createElement("button", { className: "btn danger-quiet", onClick: () => {
-    if (resetArmed) { setResetArmed(false); resetSeed(); }
+    if (resetArmed) { setResetArmed(false); try { localStorage.removeItem("budget:sync:v1"); } catch (e) {} STORE.wipe().finally(() => location.reload()); }
     else { setResetArmed(true); setTimeout(() => setResetArmed(false), 3e3); }
   } }, resetArmed ? "Tap again to erase everything" : "Start over")), importErr && /* @__PURE__ */ React.createElement("div", { className: "verdict red", style: { marginTop: 10 } }, /* @__PURE__ */ React.createElement("span", { className: "v-ic" }, "✕"), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("b", null, "Couldn't read that file"), /* @__PURE__ */ React.createElement("span", { className: "v-sub" }, "It wasn't a valid backup — your current data is untouched.")))), /* @__PURE__ */ React.createElement(
     Acc,
