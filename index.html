@@ -304,8 +304,12 @@ html{background:#0a1614}
 body{background:linear-gradient(180deg,#16413a 0px,#10302b 300px,#0a1614 680px) no-repeat #0a1614}
 .shell{background-image:none}
 .top{padding:calc(20px + env(safe-area-inset-top, 0px)) 0 6px}
-.logo{font-size:36px;font-weight:800;letter-spacing:-.02em;text-transform:lowercase;color:var(--ink)}
+.logo{position:relative;display:inline-block;isolation:isolate;font-size:36px;font-weight:800;letter-spacing:-.02em;text-transform:lowercase;color:var(--ink)}
 .logo::after{content:".";color:var(--accent)}
+.logo-word{position:relative}
+.logo-jar{position:absolute;left:50%;top:50%;height:1.5em;width:auto;z-index:-1;
+  transform:translate(-45%,-50%) skewX(-8deg);opacity:.34;filter:blur(.3px);pointer-events:none}
+.logo-jar rect{fill:var(--accent)}
 .bankish .card{background:transparent;box-shadow:none;border-radius:0;padding:6px 0;margin-bottom:26px}
 .center{text-align:left}
 .bank-hero{text-align:left;padding:14px 0 6px}
@@ -2883,6 +2887,12 @@ function CoinAnim() {
 function TypeOn({ text }) {
   return /* @__PURE__ */ React.createElement("span", null, [...text].map((ch, i) => /* @__PURE__ */ React.createElement("span", { key: i, className: "ty", style: { animationDelay: i * 45 + "ms" } }, ch)), /* @__PURE__ */ React.createElement("span", { className: "wink", style: { animationDelay: text.length * 45 + 200 + "ms, " + (text.length * 45 + 550) + "ms" } }, " ;)"));
 }
+// Wordmark: "stash." resting above a jar-shaped cast shadow — a visual pun on
+// squirreling money into a jar. The jar is a flat silhouette, skewed and
+// theme-toned so it reads as a shadow the word throws, not a separate icon.
+function LogoMark() {
+  return /* @__PURE__ */ React.createElement("div", { className: "logo" }, /* @__PURE__ */ React.createElement("svg", { className: "logo-jar", viewBox: "0 0 34 48", "aria-hidden": true }, /* @__PURE__ */ React.createElement("rect", { x: 8, y: 2.5, width: 18, height: 6, rx: 2.2 }), /* @__PURE__ */ React.createElement("rect", { x: 10.5, y: 7.5, width: 13, height: 5 }), /* @__PURE__ */ React.createElement("rect", { x: 4.5, y: 11, width: 25, height: 33, rx: 6.5 })), /* @__PURE__ */ React.createElement("span", { className: "logo-word" }, "Stash"));
+}
 function PocketMark({ size }) {
   const w = size || 30;
   return /* @__PURE__ */ React.createElement("svg", { width: w, height: w, viewBox: "0 0 32 32", "aria-hidden": true }, /* @__PURE__ */ React.createElement("g", { transform: "rotate(-9 15 6)" }, /* @__PURE__ */ React.createElement("rect", { x: 8.5, y: 1, width: 14, height: 10, rx: 1.6, fill: "var(--accent)" }), /* @__PURE__ */ React.createElement("circle", { cx: 15.5, cy: 6, r: 2.1, fill: "none", stroke: "#0a1614", strokeWidth: 1.1, opacity: 0.55 })), /* @__PURE__ */ React.createElement("path", { d: "M5 9.5 H27 L25.4 21.5 C25 26.5 21 29.5 16 29.5 C11 29.5 7 26.5 6.6 21.5 Z", fill: "var(--page)", stroke: "var(--ink2)", strokeWidth: 1.6, strokeLinejoin: "round" }), /* @__PURE__ */ React.createElement("path", { d: "M8.2 12.5 H23.8 L22.6 20.8 C22.3 24.4 19.8 26.6 16 26.6 C12.2 26.6 9.7 24.4 9.4 20.8 Z", fill: "none", stroke: "var(--accent)", strokeWidth: 1.1, strokeDasharray: "2.6 2", strokeLinecap: "round" }));
@@ -3804,7 +3814,7 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     ["settings", "Settings", "\u2699"]
   ];
   const effTab = simpleMode && (tab === "budget" || tab === "funds") ? "home" : tab;
-  return /* @__PURE__ */ React.createElement("div", { className: "shell" }, /* @__PURE__ */ React.createElement("header", { className: "top" }, /* @__PURE__ */ React.createElement("div", { className: "logo" }, "Stash")), month !== CURRENT_MONTH && effTab !== "home" && /* @__PURE__ */ React.createElement("button", { className: "backnow", onClick: () => setMonth(CURRENT_MONTH) }, "Viewing ", monthLabel(month), " \xB7 back to ", monthLabel(CURRENT_MONTH), " \u2192"), /* @__PURE__ */ React.createElement("div", { key: effTab, className: "tab-pane" }, effTab === "home" && (simpleMode ? /* @__PURE__ */ React.createElement(SimpleHome, { ...shared, ...{ setSetting, addTxn, addIncome, openAdd: (init) => { setSheetInit(init); setSheetKind("spend"); setSheetOpen(true); } } }) : /* @__PURE__ */ React.createElement(Home, { ...shared })), effTab === "budget" && /* @__PURE__ */ React.createElement(Budget, { ...shared }), effTab === "activity" && /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement("div", { className: "shell" }, /* @__PURE__ */ React.createElement("header", { className: "top" }, /* @__PURE__ */ React.createElement(LogoMark, null)), month !== CURRENT_MONTH && effTab !== "home" && /* @__PURE__ */ React.createElement("button", { className: "backnow", onClick: () => setMonth(CURRENT_MONTH) }, "Viewing ", monthLabel(month), " \xB7 back to ", monthLabel(CURRENT_MONTH), " \u2192"), /* @__PURE__ */ React.createElement("div", { key: effTab, className: "tab-pane" }, effTab === "home" && (simpleMode ? /* @__PURE__ */ React.createElement(SimpleHome, { ...shared, ...{ setSetting, addTxn, addIncome, openAdd: (init) => { setSheetInit(init); setSheetKind("spend"); setSheetOpen(true); } } }) : /* @__PURE__ */ React.createElement(Home, { ...shared })), effTab === "budget" && /* @__PURE__ */ React.createElement(Budget, { ...shared }), effTab === "activity" && /* @__PURE__ */ React.createElement(
     Activity,
     {
       ...shared,
