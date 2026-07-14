@@ -1055,6 +1055,41 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
     if (coreBurn <= 0) return Infinity;
     return liquidCushion / coreBurn;
   }
+  // trailing-3M average of TOTAL monthly spending (all non-transfer,
+  // non-savings) — your real spending habits, not just needs.
+  function spendBurn(txns, categories, allMonths, asOfMonth) {
+    var saveIds = {};
+    categories.forEach(function (cat) { if (cat.class === "SAVING") saveIds[cat.id] = 1; });
+    var months = trailingMonths(allMonths, asOfMonth, 3);
+    if (!months.length) return 0;
+    var total = months.reduce(function (s, m) {
+      return s + txns.reduce(function (ss, t) {
+        return (isSpend(t) && monthOf(t.date) === m && !saveIds[t.categoryId]) ? ss + t.amount : ss;
+      }, 0);
+    }, 0);
+    return Math.round(total / months.length);
+  }
+  // Safety net, in months: how long your liquid cushion (bank + savings)
+  // covers your REAL spending if income stopped — trimmed when you're
+  // outspending your income (the cushion is already eroding), and pulled
+  // toward your months-of-cover goal so an ambitious goal reads stricter.
+  // Considers: savings (cushion), spending habits (avgSpend), current
+  // earnings (avgIncome), and the savings goal (targetMonths).
+  function safetyNetMonths(cushion, avgSpend, avgIncome, targetMonths) {
+    if (avgSpend <= 0) return cushion > 0 ? Infinity : 0;
+    var m = Math.max(0, cushion) / avgSpend;
+    // erosion: if you spend more than you earn, scale runway by the share of
+    // spending your income actually covers (never below 35%).
+    if (avgIncome > 0 && avgSpend > avgIncome) {
+      m *= Math.max(0.35, avgIncome / avgSpend);
+    }
+    // goal awareness: a bigger months-of-cover goal makes the read a touch
+    // more conservative until you've built past it (bounded, never > raw).
+    if (targetMonths > 0 && m < targetMonths) {
+      m *= 0.5 + 0.5 * (m / targetMonths);
+    }
+    return m;
+  }
 
   /* ---------- §5.6 month-end projector (pace) ---------- */
   // guards daysElapsed == 0 (§5.6/§8)
@@ -1320,6 +1355,7 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
     monthsWithData: monthsWithData, trailingMonths: trailingMonths,
     trailingAverage: trailingAverage, trailingMin: trailingMin, baselineIncome: baselineIncome,
     coreMonthlyBurn: coreMonthlyBurn, runwayMonths: runwayMonths,
+    spendBurn: spendBurn, safetyNetMonths: safetyNetMonths,
     projectSpend: projectSpend, isDeficit: isDeficit, monthIsRed: monthIsRed,
     splitPool: splitPool, allocate: allocate,
     monthlySetAside: monthlySetAside, monthsUntilFunded: monthsUntilFunded,
@@ -2254,6 +2290,18 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
     var burn = C.coreMonthlyBurn(txns, cats, allMonths, "2026-06");
     var rw = C.runwayMonths(seed.settings.liquidCushion, burn);
     ok("runway is a real alarm (< 1 month)", rw > 0 && rw < 1, "runway=" + rw.toFixed(3));
+
+    /* safety net: total-spend burn, earnings-aware, goal-aware (less lenient) */
+    var sb = C.spendBurn(txns, cats, allMonths, "2026-06");
+    ok("spendBurn counts more than needs-only burn", sb >= burn, "spendBurn=" + sb + " needBurn=" + burn);
+    ok("plenty of cushion, healthy income => generous runway",
+      C.safetyNetMonths(C.c(12000), C.c(2000), C.c(3000), 3) > 5.5);
+    ok("outspending income trims the runway",
+      C.safetyNetMonths(C.c(6000), C.c(3000), C.c(1500), 0) < C.safetyNetMonths(C.c(6000), C.c(3000), C.c(3000), 0));
+    eq("no spend => infinite when there's a cushion",
+      C.safetyNetMonths(C.c(5000), 0, C.c(2000), 3), Infinity);
+    ok("a bigger goal reads stricter below target",
+      C.safetyNetMonths(C.c(4000), C.c(2000), C.c(2500), 6) < C.safetyNetMonths(C.c(4000), C.c(2000), C.c(2500), 1));
 
     eq("projector guards daysElapsed==0", C.projectSpend(50000, 0, 30), 0);
     eq("projector pace correct", C.projectSpend(30000, 10, 30), 90000);
@@ -3393,9 +3441,10 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
   );
   const asOf = statsMonths.length ? statsMonths[statsMonths.length - 1] : CURRENT_MONTH;
   const burn = useMemo(
-    () => C.coreMonthlyBurn(txns, categories, statsMonths, asOf),
+    () => C.spendBurn(txns, categories, statsMonths, asOf),
     [txns, categories, statsMonths, asOf]
   );
+  const avgIncome = useMemo(() => C.trailingAverage(deposits, 3), [deposits]);
   const savingIds = useMemo(() => {
     const m = {};
     categories.forEach((c) => {
@@ -3430,7 +3479,7 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     return anchor.cents + inflow - outflow;
   }, [anchor, income, txns]);
   const totalCushion = (availableNow != null ? availableNow : settings.liquidCushion) + savedTotal;
-  const runway = C.runwayMonths(totalCushion, burn);
+  const runway = C.safetyNetMonths(totalCushion, burn, avgIncome, settings.targetRunway);
   const suggestions = useMemo(() => {
     const months3 = C.trailingMonths(statsMonths, asOf, 3);
     const weights = {};
@@ -4248,9 +4297,7 @@ function Activity(p) {
   const [editing, setEditing] = useState(null);
   const [q, setQ] = useState("");
   const [sortBy, setSortBy] = useState("date");
-  const opts = [/* @__PURE__ */ React.createElement("option", { key: "_", value: "" }, "\u{1F3F7} needs a label")].concat(
-    categories.map((c) => /* @__PURE__ */ React.createElement("option", { key: c.id, value: c.id }, c.icon, " ", c.name))
-  );
+  const opts = categories.map((c) => /* @__PURE__ */ React.createElement("option", { key: c.id, value: c.id }, c.icon, " ", c.name));
   const savingIds = {};
   categories.forEach((c) => {
     if (c.class === "SAVING") savingIds[c.id] = 1;
@@ -4333,7 +4380,6 @@ function EditSheet({ kind, entry, categories, simpleMode, save, close, addBill }
       value: f.categoryId,
       onChange: (e) => setF({ ...f, categoryId: e.target.value })
     },
-    /* @__PURE__ */ React.createElement("option", { value: "" }, "\u{1F3F7} no category yet"),
     categories.map((c) => /* @__PURE__ */ React.createElement("option", { key: c.id, value: c.id }, c.icon, " ", c.name))
   ), /* @__PURE__ */ React.createElement("button", { className: "save", onClick: () => {
     if (!save(f)) setErr(true);
