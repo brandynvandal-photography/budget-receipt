@@ -764,6 +764,9 @@ button:focus-visible,a:focus-visible,select:focus-visible,input:focus-visible,la
 .bank-chip{display:flex;align-items:center;gap:8px;padding:10px;border:1px solid var(--grid);border-radius:11px;background:var(--surface);color:var(--ink);font-size:13px;font-weight:600;cursor:pointer;text-align:left}
 .bank-chip:active{transform:scale(.97)}
 .bank-secure{font-size:11.5px;color:var(--muted);line-height:1.4}
+.bank-tag.demo{color:var(--warn);border-color:var(--warn)}
+.bank-demo{font-size:12px;line-height:1.45;color:var(--ink);background:var(--warn-bg);border:1px solid color-mix(in srgb, var(--warn) 45%, transparent);border-radius:10px;padding:9px 11px}
+.bank-preview-note{font-size:11.5px;color:var(--muted);line-height:1.4;text-align:center}
 .bank-err{font-size:12.5px;color:#ff8f8f}
 </style>
 </head>
@@ -3795,6 +3798,10 @@ function LockSetup({ settings, setSetting, data }) {
    onboarding and in Settings. ---- */
 function BankConnect({ settings, setSetting }) {
   const P = window.BankProvider;
+  // While the real bank-linking backend isn't wired in, the provider is the
+  // "mock" — it SIMULATES connections (no bank login, no real data). Surface
+  // that loudly so a simulated connection is never mistaken for a real one.
+  const demo = !!(P && P.provider === "mock");
   const links = settings.bankLinks || [];
   const [phase, setPhase] = useState("idle"); // idle | picking | working | error
   const [session, setSession] = useState(null);
@@ -3844,10 +3851,12 @@ function BankConnect({ settings, setSetting }) {
     avatar(l.institution, 34),
     /* @__PURE__ */ React.createElement("div", { className: "bank-main" },
       /* @__PURE__ */ React.createElement("div", { className: "bank-name" }, (l.institution && l.institution.name) || "Bank",
+        l.provider === "mock" && /* @__PURE__ */ React.createElement("span", { className: "bank-tag demo" }, "demo"),
         l.readOnly && /* @__PURE__ */ React.createElement("span", { className: "bank-tag" }, "read-only")),
       /* @__PURE__ */ React.createElement("div", { className: "bank-accts" }, (l.accounts || []).map((a) => a.name + (a.mask ? " ··" + a.mask : "")).join(" · "))),
     /* @__PURE__ */ React.createElement("button", { className: "bank-x", onClick: () => disconnect(l), "aria-label": tr("bank_disconnect") + " " + ((l.institution && l.institution.name) || "bank") }, "×")));
   const picker = phase === "picking" && /* @__PURE__ */ React.createElement("div", { className: "bank-pick" },
+    demo && /* @__PURE__ */ React.createElement("div", { className: "bank-demo" }, "⚠️ Preview — bank linking isn't live yet. Picking a bank here is simulated: no login, no real accounts, no data leaves your device."),
     /* @__PURE__ */ React.createElement("div", { className: "bank-pick-h" }, tr("ob_bank_pick_h")),
     /* @__PURE__ */ React.createElement("div", { className: "bank-pick-grid" }, insts.map((b) => /* @__PURE__ */ React.createElement("button", { key: b.id, className: "bank-chip", onClick: () => pick(b) },
       avatar(b, 26), b.name))),
@@ -3859,7 +3868,8 @@ function BankConnect({ settings, setSetting }) {
   return /* @__PURE__ */ React.createElement("div", { className: "bank-connect" },
     rows.length > 0 && /* @__PURE__ */ React.createElement("div", { className: "bank-list" }, rows),
     err && /* @__PURE__ */ React.createElement("div", { className: "bank-err" }, err),
-    picker, cta);
+    picker, cta,
+    demo && phase !== "picking" && /* @__PURE__ */ React.createElement("div", { className: "bank-preview-note" }, "Preview — connections here are simulated until bank linking goes live."));
 }
 function Onboarding({ settings, setSetting, setTab }) {
   const [step, setStep] = useState(0);
