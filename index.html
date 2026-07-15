@@ -308,6 +308,7 @@ body{background:linear-gradient(180deg,#16413a 0px,#10302b 300px,#0a1614 680px) 
 .logo::after{content:".";color:var(--accent)}
 .logo-word{position:relative}
 .logo-accent{color:var(--accent)}
+.ob-wm{white-space:nowrap}
 .logo-jar{position:absolute;left:50%;top:50%;height:1.62em;width:auto;z-index:-1;
   transform:translate(-45%,-50%) skewX(-8deg);opacity:.32;
   filter:blur(.55px) drop-shadow(0 1px 1.5px rgba(69,224,166,.4));
@@ -4117,7 +4118,7 @@ function Onboarding({ settings, setSetting, setTab }) {
   if (step === 0) {
     body = /* @__PURE__ */ React.createElement("div", { className: "ob-card" },
       /* @__PURE__ */ React.createElement("div", { className: "ob-jar" }, /* @__PURE__ */ React.createElement(PocketMark, { size: 52 })),
-      /* @__PURE__ */ React.createElement("h1", { className: "ob-h" }, tr("ob_welcome_h")),
+      /* @__PURE__ */ (() => { const _w = tr("ob_welcome_h").split("In My Stash"); return /* @__PURE__ */ React.createElement("h1", { className: "ob-h" }, _w[0], /* @__PURE__ */ React.createElement("span", { className: "ob-wm" }, "inmy", /* @__PURE__ */ React.createElement("span", { className: "logo-accent" }, "stash.")), _w.slice(1).join("In My Stash")); })(),
       /* @__PURE__ */ React.createElement("p", { className: "ob-p" }, tr("ob_welcome_p")),
       /* @__PURE__ */ React.createElement("div", { className: "ob-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: () => setStep(1) }, tr("ob_getstarted"))));
   } else if (step === 1) {
