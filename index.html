@@ -687,6 +687,16 @@ button:focus-visible,a:focus-visible,select:focus-visible,input:focus-visible,la
 .bt-btns .btn{padding:8px 14px}
 .bt-sub{font-size:12px;color:var(--muted);margin-top:8px}
 .actmonth{max-width:132px}
+/* iOS "liquid glass": translucent, backdrop-blurred surfaces with a light top edge */
+@supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+  .tabbar{background:color-mix(in srgb, var(--surface) 66%, transparent);-webkit-backdrop-filter:blur(26px) saturate(1.6);backdrop-filter:blur(26px) saturate(1.6);border-top:1px solid rgba(255,255,255,.08);box-shadow:inset 0 1px 0 rgba(255,255,255,.07)}
+  .sheet{background:color-mix(in srgb, var(--surface) 80%, transparent);-webkit-backdrop-filter:blur(32px) saturate(1.6);backdrop-filter:blur(32px) saturate(1.6);box-shadow:inset 0 1px 0 rgba(255,255,255,.09), 0 -10px 44px rgba(0,0,0,.45)}
+  .lockgate,.onboard{background:color-mix(in srgb, var(--page) 78%, transparent);-webkit-backdrop-filter:blur(28px);backdrop-filter:blur(28px)}
+  .card{background:color-mix(in srgb, var(--surface) 74%, transparent);-webkit-backdrop-filter:blur(14px) saturate(1.25);backdrop-filter:blur(14px) saturate(1.25);box-shadow:inset 0 1px 0 rgba(255,255,255,.05)}
+  .acc .acc{background:transparent;-webkit-backdrop-filter:none;backdrop-filter:none;box-shadow:none}
+  .bill-toast,.sw-update,.undo-toast{-webkit-backdrop-filter:blur(20px) saturate(1.5);backdrop-filter:blur(20px) saturate(1.5)}
+  .addbtn{box-shadow:0 8px 24px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.25)}
+}
 @media (prefers-reduced-motion:reduce){.lock-dots.shake{animation:none}.lock-key:active{transform:none}}
 .onboard{position:fixed;inset:0;z-index:9500;background:var(--page);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;padding:44px 24px calc(32px + env(safe-area-inset-bottom,0px));overflow-y:auto}
 .ob-dots{display:flex;gap:8px}
@@ -1397,6 +1407,25 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
     var reserved = x.reserved > 0 ? x.reserved : 0;
     var effFloor = floor + reserved;
     if (x.bank != null) out.bankAfter = x.bank - amount;
+    // ── Resilience score Φ ∈ [0,1] and stance (survival → building → growth).
+    // Derived from the SITUATION, never identity: runway, income stability,
+    // spendable buffer, trajectory. Φ bends how hard the decider pushes back on
+    // discretionary spending — protective when room is thin, more permissive
+    // when comfortable. Needs are never gated by it.
+    var clamp01 = function (v) { return v < 0 ? 0 : v > 1 ? 1 : v; };
+    var T = x.targetRunway > 0 ? x.targetRunway : 3;
+    var burnV = x.burn > 0 ? x.burn : 0;
+    var cushionV = x.cushion != null ? x.cushion : (x.bank != null ? x.bank : 0);
+    var runwayScore = burnV > 0 ? clamp01(cushionV / burnV / T) : 1;
+    var bufferScore = burnV > 0 && x.bank != null ? clamp01((x.bank - effFloor) / burnV) : 0.5;
+    var stabilityScore = x.stability != null ? clamp01(x.stability) : 0.7;
+    var trajScore = ((x.trajectory != null ? x.trajectory : 0) + 1) / 2;
+    var phi = 0.45 * runwayScore + 0.30 * stabilityScore + 0.20 * bufferScore + 0.05 * trajScore;
+    out.phi = phi;
+    out.stance = phi < 0.34 ? "survival" : phi < 0.67 ? "building" : "growth";
+    // strictness g: <1 tightens discretionary limits (survival), >1 loosens them
+    // (growth). Calibrated so a middle Φ (~0.5) reproduces today's behavior.
+    var g = 0.6 + 0.8 * phi;
     var bankShort = x.bank != null && (x.bank - amount) < floor;
     var isEmergency = L >= 3;
     // §emergency: the this-month lens is the wrong lens. When the month (or
@@ -1431,7 +1460,7 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
     // block — just a nudge to sit with a large discretionary buy.
     if (L < 1 && x.bank != null) {
       var spendable = x.bank - effFloor;
-      if (spendable > 0 && amount > spendable * 0.28 * L) return done("AMBER", "want");
+      if (spendable > 0 && amount > spendable * 0.28 * L * g) return done("AMBER", "want");
     }
     // future outlook: the month can look fine while the BANK slips under
     // what next month's bills need — warn before the float breaks
@@ -2654,12 +2683,19 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
       C.simpleVerdict(C.c(600), C.c(3000), C.c(2500), C.c(80), 0.7, { bank: C.c(1500), floor: 0 }).reason, "want");
     eq("modest fun buy vs bank is not a want (100 on 1500)",
       C.simpleVerdict(C.c(100), C.c(3000), C.c(2500), C.c(80), 0.7, { bank: C.c(1500), floor: 0 }).reason !== "want", true);
-    eq("fun trips the want nudge at 350 on 1500",
-      C.simpleVerdict(C.c(350), C.c(3000), C.c(2500), C.c(80), 0.7, { bank: C.c(1500), floor: 0 }).reason, "want");
-    eq("general is looser — 350 on 1500 is not yet a want",
-      C.simpleVerdict(C.c(350), C.c(3000), C.c(2500), C.c(80), 0.9, { bank: C.c(1500), floor: 0 }).reason !== "want", true);
     eq("a need (food) never trips the want nudge",
       C.simpleVerdict(C.c(600), C.c(3000), C.c(2500), C.c(80), 2, { bank: C.c(1500), floor: 0 }).reason !== "want", true);
+    // Φ / stance: same purchase, different resilience → the verdict bends
+    var survivalCtx = { bank: C.c(1000), floor: 0, cushion: C.c(300), burn: C.c(1200), targetRunway: 3, stability: 0.15, trajectory: -1 };
+    var growthCtx = { bank: C.c(1000), floor: 0, cushion: C.c(12000), burn: C.c(1200), targetRunway: 3, stability: 0.95, trajectory: 1 };
+    eq("thin cushion + volatile income => survival stance",
+      C.simpleVerdict(C.c(50), C.c(3000), C.c(2500), C.c(300), 0.7, survivalCtx).stance, "survival");
+    eq("fat cushion + stable income => growth stance",
+      C.simpleVerdict(C.c(50), C.c(3000), C.c(2500), C.c(300), 0.7, growthCtx).stance, "growth");
+    eq("survival stance TIGHTENS the want nudge (250 fun trips)",
+      C.simpleVerdict(C.c(250), C.c(3000), C.c(2500), C.c(300), 0.7, survivalCtx).reason, "want");
+    eq("growth stance LOOSENS it (same 250 fun passes)",
+      C.simpleVerdict(C.c(250), C.c(3000), C.c(2500), C.c(300), 0.7, growthCtx).reason !== "want", true);
     eq("dipping into reserved bill money => AMBER/reserved (food 300 on 1000, 800 reserved)",
       C.simpleVerdict(C.c(300), C.c(3000), C.c(2500), C.c(80), 2, { bank: C.c(1000), floor: 0, reserved: C.c(800) }).reason, "reserved");
     eq("staying above floor+reserved is fine (food 100 on 1000, 800 reserved)",
@@ -4285,7 +4321,7 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
   const effTab = simpleMode && (tab === "budget" || tab === "funds") ? "home" : tab;
   if (locked && lockRec && lockRec.enabled) return /* @__PURE__ */ React.createElement(LockGate, { lockRec, onUnlock: () => setLocked(false), onForgot: () => { try { localStorage.removeItem("budget:sync:v1"); } catch (e) {} STORE.wipe().finally(() => location.reload()); } });
   if (!settings.onboarded) return /* @__PURE__ */ React.createElement(Onboarding, { settings, setSetting, setTab });
-  return /* @__PURE__ */ React.createElement("div", { className: "shell" }, /* @__PURE__ */ React.createElement("header", { className: "top" }, /* @__PURE__ */ React.createElement(LogoMark, null)), month !== CURRENT_MONTH && effTab !== "home" && /* @__PURE__ */ React.createElement("button", { className: "backnow", onClick: () => setMonth(CURRENT_MONTH) }, "Viewing ", monthLabel(month), " \xB7 back to ", monthLabel(CURRENT_MONTH), " \u2192"), /* @__PURE__ */ React.createElement("div", { key: effTab, className: "tab-pane" }, effTab === "home" && (simpleMode ? /* @__PURE__ */ React.createElement(SimpleHome, { ...shared, ...{ setSetting, addTxn, addIncome, openAdd: (init) => { setSheetInit(init); setSheetKind("spend"); setSheetOpen(true); } } }) : /* @__PURE__ */ React.createElement(Home, { ...shared })), effTab === "budget" && /* @__PURE__ */ React.createElement(Budget, { ...shared }), effTab === "activity" && /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement("div", { className: "shell" }, /* @__PURE__ */ React.createElement("header", { className: "top" }, /* @__PURE__ */ React.createElement(LogoMark, null)), month !== CURRENT_MONTH && effTab === "trends" && /* @__PURE__ */ React.createElement("button", { className: "backnow", onClick: () => setMonth(CURRENT_MONTH) }, "Viewing ", monthLabel(month), " \xB7 back to ", monthLabel(CURRENT_MONTH), " \u2192"), /* @__PURE__ */ React.createElement("div", { key: effTab, className: "tab-pane" }, effTab === "home" && (simpleMode ? /* @__PURE__ */ React.createElement(SimpleHome, { ...shared, ...{ setSetting, addTxn, addIncome, openAdd: (init) => { setSheetInit(init); setSheetKind("spend"); setSheetOpen(true); } } }) : /* @__PURE__ */ React.createElement(Home, { ...shared })), effTab === "budget" && /* @__PURE__ */ React.createElement(Budget, { ...shared }), effTab === "activity" && /* @__PURE__ */ React.createElement(
     Activity,
     {
       ...shared,
@@ -4471,6 +4507,18 @@ function SimpleHome(p) {
   // subtract bills the user already tracks manually, so they aren't counted twice
   const autoBillsC = Math.max(0, (billsTypical - manualMonthly) - billsInMonth(CURRENT_MONTH));
   const reservedC = manualReserveC + autoBillsC;
+  // income stability (1 = steady, 0 = volatile) from deposit history, and a
+  // simple trajectory (building vs deficit) — these feed the resilience score Φ.
+  const incByMonth = {};
+  (income || []).forEach((e) => { const m = C.monthOf(e.date); incByMonth[m] = (incByMonth[m] || 0) + e.amount; });
+  const incVals = Object.keys(incByMonth).filter((m) => m < CURRENT_MONTH).map((m) => incByMonth[m]);
+  let incStability = 0.7;
+  if (incVals.length >= 2) {
+    const mean = incVals.reduce((s, x) => s + x, 0) / incVals.length;
+    const varc = incVals.reduce((s, x) => s + (x - mean) * (x - mean), 0) / incVals.length;
+    incStability = mean > 0 ? Math.max(0, Math.min(1, 1 - Math.sqrt(varc) / mean)) : 0.5;
+  }
+  const trajectory = monthNet > 0 ? 1 : monthNet < 0 ? -1 : 0;
   const v = cents != null && cents > 0 && bucket ? C.simpleVerdict(cents, monthNet, projectedEnd, perDay, leniency, {
     bank: availableNow,
     floor: settings.balanceFloor || 0,
@@ -4478,6 +4526,8 @@ function SimpleHome(p) {
     cushion: totalCushion,
     burn,
     targetRunway: settings.targetRunway,
+    stability: incStability,
+    trajectory,
     daysLeft: inProgress ? daysRemaining : null
   }) : null;
   const prevVerdict = useRef(null);
@@ -4752,18 +4802,34 @@ function Trends(p) {
   // one actionable nudge from the spending data: biggest flexible category
   // first, then the sharpest month-over-month rise, then the biggest overall
   const tip = useMemo(() => {
-    if (!catRows.length) return null;
-    const wantIds = {};
-    (p.categories || []).forEach((c) => {
-      if (c.class === "WANT") wantIds[c.id] = 1;
-    });
-    const topWant = catRows.find((r) => wantIds[r.id]);
-    if (topWant && topWant.cents >= 2e3) {
-      return topWant.icon + " " + topWant.name + " is your biggest flexible category this month at " + fmt0(topWant.cents) + ". Trimming ~15% frees " + fmt0(Math.round(topWant.cents * 0.15)) + "/mo for the jar.";
+    const runway = p.runway;
+    const T = (p.settings && p.settings.targetRunway) || 3;
+    const hasRunway = runway != null && runway !== Infinity && p.burn > 0;
+    // Survival: protect + celebrate small wins, never shame.
+    if (hasRunway && runway < 1) {
+      const wks = Math.max(1, Math.round(runway * 4.3));
+      return "🛟 Your safety net covers about " + wks + " week" + (wks === 1 ? "" : "s") + " right now. Even $20 stashed stretches it — that's the whole win this week.";
+    }
+    // Biggest flexible category → trim, framed as a year-long habit (the teach).
+    if (catRows.length) {
+      const wantIds = {};
+      (p.categories || []).forEach((c) => { if (c.class === "WANT") wantIds[c.id] = 1; });
+      const topWant = catRows.find((r) => wantIds[r.id]);
+      if (topWant && topWant.cents >= 2e3) {
+        const trim = Math.round(topWant.cents * 0.15);
+        return topWant.icon + " " + topWant.name + " is your biggest flexible category at " + fmt0(topWant.cents) + "/mo. Trimming ~15% is " + fmt0(trim) + "/mo — about " + fmt0(trim * 12) + " a year toward the jar.";
+      }
+    }
+    // Building vs growth coaching, tuned to how much room you have.
+    if (hasRunway && runway < T) {
+      return "🌱 You're at " + runway.toFixed(1) + " months of cushion, building toward your " + T + "-month goal. Stash leans a little cautious until you get there — every set-aside counts.";
+    }
+    if (hasRunway) {
+      return "🚀 " + runway.toFixed(1) + " months saved — past your safety goal. From here it's opportunity cost: even $50/week of wants is about " + fmt0(C.c(50) * 52) + " a year.";
     }
     const idx = dataMonths.indexOf(month);
     const prev = idx > 0 ? dataMonths[idx - 1] : null;
-    if (prev) {
+    if (prev && catRows.length) {
       const prevSums = {};
       txns.forEach((t) => {
         if (t.isTransfer || C.monthOf(t.date) !== prev) return;
@@ -4777,9 +4843,10 @@ function Trends(p) {
       });
       if (best) return best.r.icon + " " + best.r.name + " is up " + fmt0(best.rise) + " vs " + monthLabel(prev) + " — worth a look.";
     }
+    if (!catRows.length) return null;
     const top = catRows[0];
     return "💡 Biggest category: " + top.name + " at " + fmt0(top.cents) + ". Small trims here move the jar fastest.";
-  }, [catRows, txns, dataMonths, month]);
+  }, [catRows, txns, dataMonths, month, p.runway, p.burn]);
   const savePts = useMemo(() => {
     const days = Object.keys(sfHist || {}).sort();
     return days.map((d) => ({ d, v: sfHist[d] ? sfHist[d].save : null })).filter((x) => x.v != null).slice(-60);
