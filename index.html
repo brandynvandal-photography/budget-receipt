@@ -749,6 +749,10 @@ button:focus-visible,a:focus-visible,select:focus-visible,input:focus-visible,la
 .bank-list{display:flex;flex-direction:column;gap:8px}
 .bank-row{display:flex;align-items:center;gap:11px;padding:10px 8px 10px 12px;border:1px solid var(--grid);border-radius:12px;background:var(--page);text-align:left}
 .bank-glyph{font-size:20px;line-height:1;flex:none}
+.bank-avatar{display:inline-flex;align-items:center;justify-content:center;flex:none;border-radius:8px;color:#fff;font-weight:800;letter-spacing:-.02em;object-fit:cover;box-shadow:inset 0 0 0 1px rgba(255,255,255,.14)}
+.bank-row.just-added{animation:bankPop .6s ease;border-color:var(--accent)}
+@keyframes bankPop{0%{background:color-mix(in srgb,var(--accent) 24%,var(--page));transform:translateY(-2px)}100%{background:var(--page);transform:none}}
+@media (prefers-reduced-motion:reduce){.bank-row.just-added{animation:none}}
 .bank-main{flex:1;min-width:0}
 .bank-name{font-size:14.5px;font-weight:650;color:var(--ink);display:flex;align-items:center;gap:7px}
 .bank-tag{font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--accent);border:1px solid var(--accent);border-radius:6px;padding:1px 5px;opacity:.85}
@@ -2137,18 +2141,20 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
   var rid = function (p) { return (p || "id") + "_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); };
 
   // A small, offline catalog of popular US institutions for the mock link
-  // screen. Emoji glyphs (not remote logos) so the connect flow makes zero
-  // network requests. The real provider returns the aggregator's institution
-  // list instead.
+  // screen. We ship each bank's BRAND COLOR (not a trademarked logo file) and
+  // render a colored monogram — branded-looking, zero network requests, no
+  // copyrighted assets bundled. The real provider (Plaid/SimpleFIN) returns an
+  // official `logo` + `color` per institution, which the UI renders instead
+  // (see BankConnect's avatar: it prefers institution.logo when present).
   var INSTITUTIONS = [
-    { id: "chase", name: "Chase", glyph: "🔵", accounts: [{ name: "Chase Total Checking", kind: "bank", mask: "4021" }, { name: "Chase Savings", kind: "save", mask: "8830" }] },
-    { id: "bofa", name: "Bank of America", glyph: "🔴", accounts: [{ name: "Advantage Checking", kind: "bank", mask: "1177" }] },
-    { id: "wells", name: "Wells Fargo", glyph: "🟡", accounts: [{ name: "Everyday Checking", kind: "bank", mask: "6642" }] },
-    { id: "chime", name: "Chime", glyph: "🟢", accounts: [{ name: "Chime Checking", kind: "bank", mask: "2093" }, { name: "Chime Savings", kind: "save", mask: "7781" }] },
-    { id: "capone", name: "Capital One", glyph: "🔶", accounts: [{ name: "360 Checking", kind: "bank", mask: "5510" }] },
-    { id: "ally", name: "Ally Bank", glyph: "🟣", accounts: [{ name: "Ally Spending", kind: "bank", mask: "3348" }, { name: "Ally Savings", kind: "save", mask: "9902" }] },
-    { id: "fidelity", name: "Fidelity", glyph: "🟩", accounts: [{ name: "Fidelity Cash Mgmt", kind: "bank", mask: "1204" }, { name: "Fidelity Brokerage", kind: "save", mask: "7788" }] },
-    { id: "usbank", name: "U.S. Bank", glyph: "🔷", accounts: [{ name: "Easy Checking", kind: "bank", mask: "8817" }] }
+    { id: "chase", name: "Chase", color: "#117ACA", accounts: [{ name: "Chase Total Checking", kind: "bank", mask: "4021" }, { name: "Chase Savings", kind: "save", mask: "8830" }] },
+    { id: "bofa", name: "Bank of America", color: "#E31837", accounts: [{ name: "Advantage Checking", kind: "bank", mask: "1177" }] },
+    { id: "wells", name: "Wells Fargo", color: "#D71E28", accounts: [{ name: "Everyday Checking", kind: "bank", mask: "6642" }] },
+    { id: "chime", name: "Chime", color: "#1EC677", accounts: [{ name: "Chime Checking", kind: "bank", mask: "2093" }, { name: "Chime Savings", kind: "save", mask: "7781" }] },
+    { id: "capone", name: "Capital One", color: "#D03027", accounts: [{ name: "360 Checking", kind: "bank", mask: "5510" }] },
+    { id: "ally", name: "Ally Bank", color: "#6C207E", accounts: [{ name: "Ally Spending", kind: "bank", mask: "3348" }, { name: "Ally Savings", kind: "save", mask: "9902" }] },
+    { id: "fidelity", name: "Fidelity", color: "#368727", accounts: [{ name: "Fidelity Cash Mgmt", kind: "bank", mask: "1204" }, { name: "Fidelity Brokerage", kind: "save", mask: "7788" }] },
+    { id: "usbank", name: "U.S. Bank", color: "#0033A0", accounts: [{ name: "Easy Checking", kind: "bank", mask: "8817" }] }
   ];
 
   // The mock stands in for the relay backend. Everything here is fabricated in
@@ -2161,7 +2167,7 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
       return wait(300).then(function () {
         return {
           session: { id: rid("sess"), startedAt: Date.now() },
-          institutions: INSTITUTIONS.map(function (b) { return { id: b.id, name: b.name, glyph: b.glyph }; })
+          institutions: INSTITUTIONS.map(function (b) { return { id: b.id, name: b.name, color: b.color, logo: b.logo || null }; })
         };
       });
     },
@@ -2171,7 +2177,7 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
       return wait(700).then(function () {
         return {
           connectionId: connectionId,
-          institution: { id: inst.id, name: inst.name, glyph: inst.glyph },
+          institution: { id: inst.id, name: inst.name, color: inst.color, logo: inst.logo || null },
           accounts: inst.accounts.map(function (a, i) {
             return { id: connectionId + "-" + i, name: a.name, kind: a.kind, mask: a.mask, balance: null };
           })
@@ -3794,6 +3800,20 @@ function BankConnect({ settings, setSetting }) {
   const [session, setSession] = useState(null);
   const [insts, setInsts] = useState([]);
   const [err, setErr] = useState("");
+  const [justAdded, setJustAdded] = useState(null);
+  // Branded mark: prefer a provider-supplied logo (Plaid/SimpleFIN send one);
+  // otherwise a colored monogram in the bank's brand color — branded-looking
+  // without bundling any trademarked logo art.
+  const monogram = (name) => {
+    const words = String(name || "").replace(/[^A-Za-z0-9 .]/g, "").split(/[\s.]+/).filter((w) => w && !/^(of|the|and|&)$/i.test(w));
+    const src = words.length ? words : [String(name || "?")];
+    return (src[0][0] + (src[1] ? src[1][0] : "")).toUpperCase();
+  };
+  const avatar = (inst, size) => {
+    const s = size || 34;
+    if (inst && inst.logo) return /* @__PURE__ */ React.createElement("img", { className: "bank-avatar", src: inst.logo, alt: "", style: { width: s, height: s } });
+    return /* @__PURE__ */ React.createElement("span", { className: "bank-avatar", style: { width: s, height: s, background: (inst && inst.color) || "#5b6b66", fontSize: Math.round(s * 0.42) } }, monogram(inst && inst.name));
+  };
   const start = () => {
     if (!P) { setErr("Bank connections aren't available right now."); setPhase("error"); return; }
     setErr(""); setPhase("working");
@@ -3811,6 +3831,8 @@ function BankConnect({ settings, setSetting }) {
       const next = (settings.bankLinks || []).filter((l) => l.connectionId !== link.connectionId);
       setSetting("bankLinks", [...next, link]);
       buzz([8, 30, 8]);
+      setJustAdded(link.connectionId);
+      setTimeout(() => setJustAdded(null), 2200);
       setPhase("idle"); setSession(null); setInsts([]);
     }).catch(() => { setErr("Connection failed. Try again."); setPhase("error"); });
   };
@@ -3818,8 +3840,8 @@ function BankConnect({ settings, setSetting }) {
     if (P && P.disconnect) { P.disconnect(l.connectionId).catch(() => {}); }
     setSetting("bankLinks", (settings.bankLinks || []).filter((x) => x.connectionId !== l.connectionId));
   };
-  const rows = links.map((l) => /* @__PURE__ */ React.createElement("div", { key: l.connectionId, className: "bank-row" },
-    /* @__PURE__ */ React.createElement("span", { className: "bank-glyph" }, (l.institution && l.institution.glyph) || "🏦"),
+  const rows = links.map((l) => /* @__PURE__ */ React.createElement("div", { key: l.connectionId, className: "bank-row" + (justAdded === l.connectionId ? " just-added" : "") },
+    avatar(l.institution, 34),
     /* @__PURE__ */ React.createElement("div", { className: "bank-main" },
       /* @__PURE__ */ React.createElement("div", { className: "bank-name" }, (l.institution && l.institution.name) || "Bank",
         l.readOnly && /* @__PURE__ */ React.createElement("span", { className: "bank-tag" }, "read-only")),
@@ -3828,7 +3850,7 @@ function BankConnect({ settings, setSetting }) {
   const picker = phase === "picking" && /* @__PURE__ */ React.createElement("div", { className: "bank-pick" },
     /* @__PURE__ */ React.createElement("div", { className: "bank-pick-h" }, tr("ob_bank_pick_h")),
     /* @__PURE__ */ React.createElement("div", { className: "bank-pick-grid" }, insts.map((b) => /* @__PURE__ */ React.createElement("button", { key: b.id, className: "bank-chip", onClick: () => pick(b) },
-      /* @__PURE__ */ React.createElement("span", { className: "bank-glyph" }, b.glyph || "🏦"), b.name))),
+      avatar(b, 26), b.name))),
     /* @__PURE__ */ React.createElement("div", { className: "bank-secure" }, "🔒 ", tr("ob_bank_secure")),
     /* @__PURE__ */ React.createElement("button", { className: "btn quiet", onClick: () => { setPhase("idle"); setSession(null); } }, tr("btn_cancel")));
   const cta = phase !== "picking" && /* @__PURE__ */ React.createElement("button", {
@@ -5754,7 +5776,7 @@ function Settings(p) {
         }
       }
     ))
-  ), /* @__PURE__ */ React.createElement(Acc, { title: tr("set_banks"), cap: (settings.bankLinks || []).length ? ((settings.bankLinks.length) + " bank" + (settings.bankLinks.length === 1 ? "" : "s")) : tr("set_banks_none") }, /* @__PURE__ */ React.createElement("div", { className: "sub", style: { marginTop: 0, marginBottom: 12 } }, "Read-only connections. Stash can see balances and transactions — it can never move your money, and your data stays encrypted on this device."), /* @__PURE__ */ React.createElement(BankConnect, { settings, setSetting })), /* @__PURE__ */ React.createElement(Acc, { title: "Recurring & upcoming", cap: (settings.commitments || []).length ? (settings.commitments.length + " item" + (settings.commitments.length === 1 ? "" : "s")) : "auto" }, /* @__PURE__ */ React.createElement(CommitmentsSetup, { settings, setSetting })), /* @__PURE__ */ React.createElement(Acc, { title: "App & data", cap: syncCfg && syncCfg.enabled ? "sync on" : "sync off" }, /* @__PURE__ */ React.createElement("div", { className: "lock-row", style: { marginTop: 0, marginBottom: 10 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 16, fontWeight: 700, letterSpacing: "-.01em", color: "var(--ink)" } }, tr("set_language")), /* @__PURE__ */ React.createElement("select", { value: settings.lang || "system", onChange: (e) => setSetting("lang", e.target.value), "aria-label": tr("set_language") }, /* @__PURE__ */ React.createElement("option", { value: "system" }, tr("set_language_system")), Object.keys(LANG_NAMES).map((code) => /* @__PURE__ */ React.createElement("option", { key: code, value: code }, LANG_NAMES[code])))), /* @__PURE__ */ React.createElement(
+  ), /* @__PURE__ */ React.createElement(Acc, { title: tr("set_banks"), cap: (settings.bankLinks || []).length ? ((settings.bankLinks.length) + " bank" + (settings.bankLinks.length === 1 ? "" : "s")) : tr("set_banks_none") }, /* @__PURE__ */ React.createElement("div", { className: "sub", style: { marginTop: 0, marginBottom: 12 } }, "Read-only connections. Stash can see balances and transactions — it can never move your money, and your data stays encrypted on this device."), syncCfg && syncCfg.enabled && /* @__PURE__ */ React.createElement("div", { className: "hint", style: { marginTop: 0, marginBottom: 12 } }, "Adding or removing a bank takes effect on this device right away. Your other devices catch up at the next sync — not instantly."), /* @__PURE__ */ React.createElement(BankConnect, { settings, setSetting })), /* @__PURE__ */ React.createElement(Acc, { title: "Recurring & upcoming", cap: (settings.commitments || []).length ? (settings.commitments.length + " item" + (settings.commitments.length === 1 ? "" : "s")) : "auto" }, /* @__PURE__ */ React.createElement(CommitmentsSetup, { settings, setSetting })), /* @__PURE__ */ React.createElement(Acc, { title: "App & data", cap: syncCfg && syncCfg.enabled ? "sync on" : "sync off" }, /* @__PURE__ */ React.createElement("div", { className: "lock-row", style: { marginTop: 0, marginBottom: 10 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 16, fontWeight: 700, letterSpacing: "-.01em", color: "var(--ink)" } }, tr("set_language")), /* @__PURE__ */ React.createElement("select", { value: settings.lang || "system", onChange: (e) => setSetting("lang", e.target.value), "aria-label": tr("set_language") }, /* @__PURE__ */ React.createElement("option", { value: "system" }, tr("set_language_system")), Object.keys(LANG_NAMES).map((code) => /* @__PURE__ */ React.createElement("option", { key: code, value: code }, LANG_NAMES[code])))), /* @__PURE__ */ React.createElement(
     Acc,
     {
       title: "Sync across devices",
