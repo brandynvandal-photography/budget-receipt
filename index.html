@@ -2194,9 +2194,9 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
       return wait(200).then(function () { return []; });
     },
     fetchTransactions: function (connectionId, sinceISO) {
-      // The relay returns read-only rows here; the mock returns an empty set so
-      // onboarding never fabricates spending into the user's real ledger.
-      return wait(200).then(function () { return []; });
+      // The relay returns real rows; the mock returns nothing so a simulated
+      // connection never fabricates spending/balances into the real ledger.
+      return wait(200).then(function () { return { transactions: [], balances: [] }; });
     },
     disconnect: function (connectionId) {
       return wait(150).then(function () { return true; });
@@ -2244,7 +2244,7 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
     listAccounts: function () { return callApi("GET", "/connections").then(function (r) { return r.connections || []; }); },
     fetchTransactions: function (connectionId, sinceISO) {
       var days = 90; if (sinceISO) { var d = Math.ceil((Date.now() - new Date(sinceISO).getTime()) / 864e5); if (d > 0) days = Math.min(365, d); }
-      return callApi("POST", "/connections/" + connectionId + "/transactions", { vaultKey: vaultKey(), sinceDays: days }).then(function (r) { return r.transactions || []; });
+      return callApi("POST", "/connections/" + connectionId + "/transactions", { vaultKey: vaultKey(), sinceDays: days }).then(function (r) { return { transactions: r.transactions || [], balances: r.balances || [] }; });
     },
     disconnect: function (connectionId) { return callApi("DELETE", "/connections/" + connectionId).catch(function () { return true; }); },
   };
@@ -3868,12 +3868,21 @@ function BankConnect({ settings, setSetting }) {
     return /* @__PURE__ */ React.createElement("span", { className: "bank-avatar", style: { width: s, height: s, background: (inst && inst.color) || "#5b6b66", fontSize: Math.round(s * 0.42) } }, monogram(inst && inst.name));
   };
   const saveLink = (res) => {
-    const link = { connectionId: res.connectionId, provider: P.provider, readOnly: !!P.readOnly,
-      institution: res.institution, accounts: res.accounts, connectedAt: Date.now() };
-    const next = (settings.bankLinks || []).filter((l) => l.connectionId !== link.connectionId);
-    setSetting("bankLinks", [...next, link]);
+    // One SimpleFIN connection can cover several banks — show one card per
+    // institution, all sharing the same connectionId (that's the relay handle).
+    const groups = (res.institutions && res.institutions.length)
+      ? res.institutions
+      : [{ institution: res.institution, accounts: res.accounts }];
+    const now = Date.now();
+    const newLinks = groups.map((g, i) => ({
+      id: res.connectionId + (groups.length > 1 ? "::" + i : ""),
+      connectionId: res.connectionId, provider: P.provider, readOnly: !!P.readOnly,
+      institution: g.institution, accounts: g.accounts || [], connectedAt: now,
+    }));
+    const next = (settings.bankLinks || []).filter((l) => l.connectionId !== res.connectionId);
+    setSetting("bankLinks", [...next, ...newLinks]);
     buzz([8, 30, 8]);
-    setJustAdded(link.connectionId);
+    setJustAdded(newLinks[0].id);
     setTimeout(() => setJustAdded(null), 2200);
     setPhase("idle"); setSession(null); setInsts([]); setSetupToken("");
   };
@@ -3906,7 +3915,7 @@ function BankConnect({ settings, setSetting }) {
     if (P && P.disconnect) { P.disconnect(l.connectionId).catch(() => {}); }
     setSetting("bankLinks", (settings.bankLinks || []).filter((x) => x.connectionId !== l.connectionId));
   };
-  const rows = links.map((l) => /* @__PURE__ */ React.createElement("div", { key: l.connectionId, className: "bank-row" + (justAdded === l.connectionId ? " just-added" : "") },
+  const rows = links.map((l) => /* @__PURE__ */ React.createElement("div", { key: l.id || l.connectionId, className: "bank-row" + (justAdded === (l.id || l.connectionId) ? " just-added" : "") },
     avatar(l.institution, 34),
     /* @__PURE__ */ React.createElement("div", { className: "bank-main" },
       /* @__PURE__ */ React.createElement("div", { className: "bank-name" }, (l.institution && l.institution.name) || "Bank",
@@ -4220,6 +4229,37 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
       live = false;
     };
   }, [syncCfg]);
+  // Relay (SimpleFIN) on-demand sync: when the app is open and there are live
+  // relay connections, pull transactions + balances and feed them into the SAME
+  // inbox state the GitHub SimpleFIN Action uses — so role auto-assignment,
+  // silent auto-import, balance anchoring, and bank-truth mode all work
+  // unchanged. Fetch happens only while the app is open (the privacy model);
+  // the relay can't read anything on its own.
+  useEffect(() => {
+    const P = window.BankProviderRelay;
+    const conns = [...new Set((settings.bankLinks || []).filter((l) => l.provider === "simplefin").map((l) => l.connectionId))];
+    if (!P || !conns.length) return;
+    let live = true;
+    Promise.all(conns.map((cid) => P.fetchTransactions(cid).catch(() => ({ transactions: [], balances: [] }))))
+      .then((results) => {
+        if (!live) return;
+        const txns = [], bals = [];
+        results.forEach((r) => { (r.transactions || []).forEach((t) => txns.push(t)); (r.balances || []).forEach((b) => bals.push(b)); });
+        if (txns.length) setInbox((prev) => {
+          const byId = {};
+          (prev || []).forEach((r) => { if (r && r.id) byId[r.id] = r; });
+          txns.forEach((r) => { if (r && r.id) byId[r.id] = r; });
+          return Object.keys(byId).map((k) => byId[k]);
+        });
+        if (bals.length) setSfBal((prev) => {
+          const byAcct = {};
+          (prev || []).forEach((b) => { if (b && b.account) byAcct[b.account] = b; });
+          bals.forEach((b) => { if (b && b.account) byAcct[b.account] = b; });
+          return Object.keys(byAcct).map((k) => byAcct[k]);
+        });
+      });
+    return () => { live = false; };
+  }, [settings.bankLinks]);
   const inboxNew = useMemo(() => {
     if (!inbox || !inbox.length) return [];
     const seen = data.sfSeen || {};
