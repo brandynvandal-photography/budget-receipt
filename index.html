@@ -556,7 +556,7 @@ body{background:linear-gradient(180deg,#16413a 0px,#10302b 300px,#0a1614 680px) 
 @keyframes pocket-in{from{transform:translateY(14px) scale(.6);opacity:0}to{transform:none;opacity:1}}
 /* static wordmark: "Stash or spend?" — two-tone, one-time entrance, verdict emphasis */
 .ask-title{line-height:1.15}
-.wordmark{display:inline-flex;align-items:baseline;justify-content:center;white-space:nowrap}
+.wordmark{display:inline-flex;align-items:baseline;justify-content:center;flex-wrap:wrap;white-space:normal;max-width:100%}
 .wm-stash,.wm-spend,.wm-or,.wm-q{display:inline-block;transition:color .35s ease,opacity .35s ease}
 .wm-stash{color:var(--accent);animation:wm-inL .5s cubic-bezier(.34,1.4,.5,1) backwards}
 .wm-spend{color:var(--ink2);animation:wm-inR .5s cubic-bezier(.34,1.4,.5,1) backwards}
@@ -584,7 +584,7 @@ body{background:linear-gradient(180deg,#16413a 0px,#10302b 300px,#0a1614 680px) 
 .til-day{color:var(--muted)}
 .ask-help{font-size:13px;color:var(--ink2);text-align:left;background:rgba(255,255,255,.04);
   border:1px solid var(--grid);border-radius:12px;padding:10px 12px;margin:10px 0 2px;line-height:1.5}
-.ask-title{position:relative}
+.ask-title{position:relative;padding:0 28px}
 .info-i{background:none;border:1px solid var(--grid);color:var(--muted);border-radius:50%;
   width:22px;height:22px;font-size:12px;line-height:1;cursor:pointer;
   position:absolute;right:0;top:50%;transform:translateY(-50%)}
@@ -723,6 +723,13 @@ button:focus-visible,a:focus-visible,select:focus-visible,input:focus-visible,la
   :root{--ring:rgba(255,255,255,.30);--grid:#4a4a47;--muted:#b0afa8}
 }
 @media (prefers-reduced-motion:reduce){.lock-dots.shake{animation:none}.lock-key:active{transform:none}}
+/* iOS/macOS "Reduce Motion": collapse every transition and animation to a
+   near-instant, non-iterating change app-wide (transitionend/animationend
+   still fire, so nothing that waits on them stalls). Specific overrides above
+   handle a few named effects; this is the catch-all for the rest. */
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.001ms !important;animation-iteration-count:1 !important;transition-duration:.001ms !important;scroll-behavior:auto !important}
+}
 .onboard{position:fixed;inset:0;z-index:9500;background:var(--page);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;padding:44px 24px calc(32px + env(safe-area-inset-bottom,0px));overflow-y:auto}
 .ob-dots{display:flex;gap:8px}
 .ob-dot{width:7px;height:7px;border-radius:50%;background:var(--ring);transition:width .2s,background .2s}
@@ -4126,6 +4133,16 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     document.addEventListener("visibilitychange", onVis);
     return () => document.removeEventListener("visibilitychange", onVis);
   }, [lockRec && lockRec.enabled, lockRec && lockRec.autoLockSec]);
+  // Text size: scale the whole UI by the user's preference. `zoom` preserves
+  // every layout relationship (the fixed tab bar and + button stay anchored)
+  // and behaves the same in Safari, Chrome, and the iOS/Android WebView.
+  // Applied to #root so onboarding, sheets, and toasts scale too.
+  useEffect(() => {
+    const root = document.getElementById("root");
+    if (!root) return;
+    const s = Math.min(1.3, Math.max(1, +settings.uiScale || 1));
+    root.style.zoom = s === 1 ? "" : String(s);
+  }, [settings.uiScale]);
   const incomeRaw = data.income;
   const txnsRaw = data.txns;
   // bank-truth mode: once accounts are connected (sfMap exists), spending
@@ -4412,8 +4429,12 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     const seen = data.sfSeen || {};
     const roles = data.sfMap || {};
     // savings/ignored accounts contribute their BALANCE only — offering
-    // their transactions would double-count transfers
-    return inbox.filter((r) => r && r.id && r.date && r.cents > 0 && roles[r.account] !== "save" && roles[r.account] !== "ignore" && roles[r.account] !== "credit" && !seen["sf-" + r.id] && !txnsRaw.some((t) => t.id === "sf-" + r.id) && !incomeRaw.some((e) => e.id === "sf-" + r.id));
+    // their transactions would double-count transfers.
+    // PENDING rows are held back on purpose: a pending charge can change its
+    // amount or its id when it posts (double-counting), or be dropped entirely
+    // (a hotel/gas hold that never clears → a phantom charge). We wait for the
+    // posted row. Balance-delta auto-ledger still reflects the held funds.
+    return inbox.filter((r) => r && r.id && r.date && r.cents > 0 && !r.pending && roles[r.account] !== "save" && roles[r.account] !== "ignore" && roles[r.account] !== "credit" && !seen["sf-" + r.id] && !txnsRaw.some((t) => t.id === "sf-" + r.id) && !incomeRaw.some((e) => e.id === "sf-" + r.id));
   }, [inbox, data.sfSeen, data.sfMap, txnsRaw, incomeRaw]);
   // zero-touch: new accounts assign their own role by name (savings-ish
   // names, e.g. "Chime Savings"/"Fidelity", pool into Savings; the rest is
@@ -4443,9 +4464,22 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     }
     if (!inboxNew.length) return;
     const R = window.BudgetReceipt;
+    // Plaid's personal-finance category (pfc) names the movement directly, so
+    // it flags transfers reliably in BOTH directions (money leaving OR entering
+    // the account) — a self-transfer counted as income would otherwise inflate
+    // deposits. SimpleFIN has no category: fall back to conservative label
+    // matching on the spend side only (never reclassify a deposit as a transfer
+    // from its label alone — that risks silently dropping a real paycheck).
+    // pfc → app category is only a FALLBACK behind merchant matching, which is
+    // usually more specific (e.g. a grocery store → gro, not just FOOD_AND_DRINK).
+    const PFC_CAT = { FOOD_AND_DRINK: "dine", TRANSPORTATION: "trans", TRAVEL: "vac", RENT_AND_UTILITIES: "util" };
     importInbox(inboxNew.map((r) => {
-      const kind = r.kind === "spend" && /transfer|xfer|fidelity|vanguard|to savings/i.test(r.label || "") ? "transfer" : r.kind;
-      return { ...r, kind, categoryId: kind === "spend" && R ? R.guessCategory(r.label, categories, merchantMap) || "" : "" };
+      const pfc = String(r.pfc || "");
+      const xferPfc = /^(TRANSFER_IN|TRANSFER_OUT|LOAN_PAYMENTS)/.test(pfc);
+      const xferLabel = r.kind === "spend" && /\b(transfer|xfer|to savings|to checking|internal transfer|wire transfer|fidelity|vanguard|robinhood|coinbase)\b/i.test(r.label || "");
+      const kind = (xferPfc || xferLabel) ? "transfer" : r.kind;
+      const cat = kind === "spend" && R ? (R.guessCategory(r.label, categories, merchantMap) || (categories.some((c) => c.id === PFC_CAT[pfc]) ? PFC_CAT[pfc] : "") || "") : "";
+      return { ...r, kind, categoryId: cat };
     }), []);
   }, [sfBal, inbox, inboxNew, data.sfMap]);
   // source-of-truth: mapped balances auto-apply as anchors whenever the
@@ -6087,7 +6121,7 @@ function Settings(p) {
         }
       }
     ))
-  ), /* @__PURE__ */ React.createElement(Acc, { title: tr("set_banks"), cap: (settings.bankLinks || []).length ? ((settings.bankLinks.length) + " bank" + (settings.bankLinks.length === 1 ? "" : "s")) : tr("set_banks_none") }, /* @__PURE__ */ React.createElement("div", { className: "sub", style: { marginTop: 0, marginBottom: 12 } }, "Read-only connections. Stash can see balances and transactions — it can never move your money, and your data stays encrypted on this device."), syncCfg && syncCfg.enabled && /* @__PURE__ */ React.createElement("div", { className: "hint", style: { marginTop: 0, marginBottom: 12 } }, "Adding or removing a bank takes effect on this device right away. Your other devices catch up at the next sync — not instantly."), /* @__PURE__ */ React.createElement("div", { className: "bank-src" }, /* @__PURE__ */ React.createElement("span", null, "Connection source"), /* @__PURE__ */ React.createElement("select", { value: settings.bankProviderMode === "relay" || settings.bankProviderMode === "plaid" ? settings.bankProviderMode : "mock", onChange: (e) => setSetting("bankProviderMode", e.target.value), "aria-label": "Bank connection source" }, /* @__PURE__ */ React.createElement("option", { value: "mock" }, "Demo (simulated)"), /* @__PURE__ */ React.createElement("option", { value: "plaid" }, "Live · Plaid (tap & log in)"), /* @__PURE__ */ React.createElement("option", { value: "relay" }, "Live · SimpleFIN (paste token)"))), /* @__PURE__ */ React.createElement(BankConnect, { settings, setSetting, disconnectBank })), /* @__PURE__ */ React.createElement(Acc, { title: "Recurring & upcoming", cap: (settings.commitments || []).length ? (settings.commitments.length + " item" + (settings.commitments.length === 1 ? "" : "s")) : "auto" }, /* @__PURE__ */ React.createElement(CommitmentsSetup, { settings, setSetting })), /* @__PURE__ */ React.createElement(Acc, { title: "App & data", cap: syncCfg && syncCfg.enabled ? "sync on" : "sync off" }, /* @__PURE__ */ React.createElement("div", { className: "lock-row", style: { marginTop: 0, marginBottom: 10 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 16, fontWeight: 700, letterSpacing: "-.01em", color: "var(--ink)" } }, tr("set_language")), /* @__PURE__ */ React.createElement("select", { value: settings.lang || "system", onChange: (e) => setSetting("lang", e.target.value), "aria-label": tr("set_language") }, /* @__PURE__ */ React.createElement("option", { value: "system" }, tr("set_language_system")), Object.keys(LANG_NAMES).map((code) => /* @__PURE__ */ React.createElement("option", { key: code, value: code }, LANG_NAMES[code])))), /* @__PURE__ */ React.createElement(
+  ), /* @__PURE__ */ React.createElement(Acc, { title: tr("set_banks"), cap: (settings.bankLinks || []).length ? ((settings.bankLinks.length) + " bank" + (settings.bankLinks.length === 1 ? "" : "s")) : tr("set_banks_none") }, /* @__PURE__ */ React.createElement("div", { className: "sub", style: { marginTop: 0, marginBottom: 12 } }, "Read-only connections. Stash can see balances and transactions — it can never move your money, and your data stays encrypted on this device."), syncCfg && syncCfg.enabled && /* @__PURE__ */ React.createElement("div", { className: "hint", style: { marginTop: 0, marginBottom: 12 } }, "Adding or removing a bank takes effect on this device right away. Your other devices catch up at the next sync — not instantly."), /* @__PURE__ */ React.createElement("div", { className: "bank-src" }, /* @__PURE__ */ React.createElement("span", null, "Connection source"), /* @__PURE__ */ React.createElement("select", { value: settings.bankProviderMode === "relay" || settings.bankProviderMode === "plaid" ? settings.bankProviderMode : "mock", onChange: (e) => setSetting("bankProviderMode", e.target.value), "aria-label": "Bank connection source" }, /* @__PURE__ */ React.createElement("option", { value: "mock" }, "Demo (simulated)"), /* @__PURE__ */ React.createElement("option", { value: "plaid" }, "Live · Plaid (tap & log in)"), /* @__PURE__ */ React.createElement("option", { value: "relay" }, "Live · SimpleFIN (paste token)"))), /* @__PURE__ */ React.createElement(BankConnect, { settings, setSetting, disconnectBank })), /* @__PURE__ */ React.createElement(Acc, { title: "Recurring & upcoming", cap: (settings.commitments || []).length ? (settings.commitments.length + " item" + (settings.commitments.length === 1 ? "" : "s")) : "auto" }, /* @__PURE__ */ React.createElement(CommitmentsSetup, { settings, setSetting })), /* @__PURE__ */ React.createElement(Acc, { title: "App & data", cap: syncCfg && syncCfg.enabled ? "sync on" : "sync off" }, /* @__PURE__ */ React.createElement("div", { className: "lock-row", style: { marginTop: 0, marginBottom: 10 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 16, fontWeight: 700, letterSpacing: "-.01em", color: "var(--ink)" } }, tr("set_language")), /* @__PURE__ */ React.createElement("select", { value: settings.lang || "system", onChange: (e) => setSetting("lang", e.target.value), "aria-label": tr("set_language") }, /* @__PURE__ */ React.createElement("option", { value: "system" }, tr("set_language_system")), Object.keys(LANG_NAMES).map((code) => /* @__PURE__ */ React.createElement("option", { key: code, value: code }, LANG_NAMES[code])))), /* @__PURE__ */ React.createElement("div", { className: "lock-row", style: { marginTop: 0, marginBottom: 10 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 16, fontWeight: 700, letterSpacing: "-.01em", color: "var(--ink)" } }, "Text size"), /* @__PURE__ */ React.createElement("select", { value: String(settings.uiScale || 1), onChange: (e) => setSetting("uiScale", +e.target.value), "aria-label": "Text size" }, /* @__PURE__ */ React.createElement("option", { value: "1" }, "Default"), /* @__PURE__ */ React.createElement("option", { value: "1.15" }, "Large"), /* @__PURE__ */ React.createElement("option", { value: "1.3" }, "Largest"))), /* @__PURE__ */ React.createElement(
     Acc,
     {
       title: "Sync across devices",
