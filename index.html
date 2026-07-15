@@ -4302,30 +4302,33 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     });
     if (changed) setSetting("relayKeys", next);
   }, [settings.relayKeys, settings.bankLinks]);
-  // Restore connections from the relay: the server (KV) is the source of truth
-  // for which banks are linked, so if a connection isn't in our local card list
-  // — lost to a reinstall, a cleared device, or a UI hiccup — add it back. Runs
-  // once keys are available. A properly disconnected bank is deleted server-side
-  // (relay disconnect), so it won't come back.
+  // Reconcile connections against the relay: the server (KV) is the source of
+  // truth for which relay banks are linked. On load we rebuild the simplefin/
+  // plaid cards to exactly match the server list — ADDS ones missing locally
+  // (reinstall/cleared device/UI hiccup) and REMOVES stale/duplicate ones the
+  // server no longer has (e.g. an old SimpleFIN connection superseded by a new
+  // setup token). Mock cards are untouched; the per-connection self-heal fetch
+  // then freshens each surviving connection's account list. Only runs on a real
+  // response (errors leave cards as-is).
   useEffect(() => {
     const P = window.BankProviderRelay;
     if (!P || !localStorage.getItem("stash.relay.userSecret")) return;
     let live = true;
     P.listAccounts().then((conns) => {
-      if (!live || !conns || !conns.length) return;
-      const have = {};
-      (settings.bankLinks || []).forEach((l) => { have[l.connectionId] = 1; });
-      const add = [];
+      if (!live || !Array.isArray(conns)) return;
+      const cur = settings.bankLinks || [];
+      const bornAt = {};
+      cur.forEach((l) => { if (l.connectionId && bornAt[l.connectionId] == null) bornAt[l.connectionId] = l.connectedAt; });
+      const out = cur.filter((l) => l.provider !== "simplefin" && l.provider !== "plaid");
       conns.forEach((c) => {
-        if (have[c.connectionId]) return;
         const groups = (c.institutions && c.institutions.length) ? c.institutions : [];
-        groups.forEach((g, i) => add.push({
+        groups.forEach((g, i) => out.push({
           id: c.connectionId + (groups.length > 1 ? "::" + i : ""), connectionId: c.connectionId,
           provider: c.provider || "simplefin", readOnly: c.readOnly !== false,
-          institution: g.institution, accounts: g.accounts || [], connectedAt: Date.now(),
+          institution: g.institution, accounts: g.accounts || [], connectedAt: bornAt[c.connectionId] || Date.now(),
         }));
       });
-      if (add.length) setSetting("bankLinks", [...(settings.bankLinks || []), ...add]);
+      if (JSON.stringify(out) !== JSON.stringify(cur)) setSetting("bankLinks", out);
     }).catch(() => {});
     return () => { live = false; };
   }, [settings.relayKeys]);
