@@ -665,6 +665,16 @@ body{background:linear-gradient(180deg,#16413a 0px,#10302b 300px,#0a1614 680px) 
 .lock-setup{display:flex;flex-direction:column;gap:10px;margin-top:2px}
 .lock-setup .lk-input{width:100%;border:1px solid var(--grid);border-radius:10px;padding:12px;background:var(--page);color:var(--ink);font-size:15px;-webkit-text-security:disc}
 .lock-setup .btn{width:100%;justify-content:center}
+.cm-list{display:flex;flex-direction:column;gap:7px;margin-bottom:12px}
+.cm-row{display:flex;align-items:center;gap:10px;padding:9px 8px 9px 12px;border:1px solid var(--grid);border-radius:10px;background:var(--page)}
+.cm-name{font-weight:600;font-size:14px;color:var(--ink);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cm-meta{font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+.cm-del{background:none;border:none;color:var(--muted);font-size:20px;line-height:1;cursor:pointer;padding:0 4px}
+.cm-add{display:grid;grid-template-columns:1fr 76px auto;gap:8px;align-items:stretch}
+.cm-in{border:1px solid var(--grid);border-radius:9px;padding:10px;background:var(--page);color:var(--ink);font-size:14px;min-width:0}
+.cm-name-in{grid-column:1/-1}
+.cm-day-in{text-align:center}
+.cm-addbtn{padding:10px 16px}
 @media (prefers-reduced-motion:reduce){.lock-dots.shake{animation:none}.lock-key:active{transform:none}}
 .onboard{position:fixed;inset:0;z-index:9500;background:var(--page);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;padding:44px 24px calc(32px + env(safe-area-inset-bottom,0px));overflow-y:auto}
 .ob-dots{display:flex;gap:8px}
@@ -1370,6 +1380,10 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
     // user-set balance floor: never let the bank drop below it (0 = the
     // literal empty-account floor)
     var floor = x.floor > 0 ? x.floor : 0;
+    // money already promised to recurring/upcoming bills (rent, subscriptions,
+    // insurance) isn't really available — hold it back above the floor.
+    var reserved = x.reserved > 0 ? x.reserved : 0;
+    var effFloor = floor + reserved;
     if (x.bank != null) out.bankAfter = x.bank - amount;
     var bankShort = x.bank != null && (x.bank - amount) < floor;
     var isEmergency = L >= 3;
@@ -1385,6 +1399,12 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
     if (bankShort) return done("RED", "bank");
     if (leftAfter < 0) return done("RED", "left");
     if (paceTip) return done("RED", "pace");
+    // above the hard floor, but dipping into money set aside for bills still
+    // due this month — a "your call", not a block (income may land first)
+    if (!isEmergency && reserved > 0 && x.bank != null && (x.bank - amount) < effFloor) {
+      out.reservedAfter = reserved;
+      return done("AMBER", "reserved");
+    }
     // wants crossing under the runway target warn even when the month is fine
     if (L <= 1 && x.cushion != null && x.burn > 0 && x.targetRunway > 0) {
       var rb = x.cushion / x.burn, ra = (x.cushion - amount) / x.burn;
@@ -1398,7 +1418,7 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
     // trips sooner than General (0.9); needs (L>=1) skip this entirely. Not a
     // block — just a nudge to sit with a large discretionary buy.
     if (L < 1 && x.bank != null) {
-      var spendable = x.bank - floor;
+      var spendable = x.bank - effFloor;
       if (spendable > 0 && amount > spendable * 0.28 * L) return done("AMBER", "want");
     }
     // future outlook: the month can look fine while the BANK slips under
@@ -2628,6 +2648,12 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
       C.simpleVerdict(C.c(350), C.c(3000), C.c(2500), C.c(80), 0.9, { bank: C.c(1500), floor: 0 }).reason !== "want", true);
     eq("a need (food) never trips the want nudge",
       C.simpleVerdict(C.c(600), C.c(3000), C.c(2500), C.c(80), 2, { bank: C.c(1500), floor: 0 }).reason !== "want", true);
+    eq("dipping into reserved bill money => AMBER/reserved (food 300 on 1000, 800 reserved)",
+      C.simpleVerdict(C.c(300), C.c(3000), C.c(2500), C.c(80), 2, { bank: C.c(1000), floor: 0, reserved: C.c(800) }).reason, "reserved");
+    eq("staying above floor+reserved is fine (food 100 on 1000, 800 reserved)",
+      C.simpleVerdict(C.c(100), C.c(3000), C.c(2500), C.c(80), 2, { bank: C.c(1000), floor: 0, reserved: C.c(800) }).reason !== "reserved", true);
+    eq("reserved never turns a hard RED soft (250 on 200 bank, 500 reserved)",
+      C.simpleVerdict(C.c(250), C.c(3000), C.c(2500), C.c(80), 2, { bank: C.c(200), floor: 0, reserved: C.c(500) }).verdict, "RED");
     ok("leniency never overrides a hard RED (no money left)",
       C.simpleVerdict(C.c(1200), C.c(1000), C.c(800), C.c(40), 3).verdict === "RED");
     eq("food bucket maps to 2x leniency", C.bucketLeniency("food"), 2);
@@ -3467,6 +3493,33 @@ function Onboarding({ settings, setSetting, setTab }) {
         /* @__PURE__ */ React.createElement("button", { className: "btn quiet", onClick: () => finish(true) }, "Set these up in Settings"), back));
   }
   return /* @__PURE__ */ React.createElement("div", { className: "onboard" }, dots, body);
+}
+/* ---- Recurring & upcoming: bills/subscriptions/insurance the decider holds
+   back. Each has an amount + a day of the month it's due; the "Stash or spend?"
+   algorithm reserves what's still due this month before it says you can spend. ---- */
+function CommitmentsSetup({ settings, setSetting }) {
+  const list = settings.commitments || [];
+  const [name, setName] = useState("");
+  const [amt, setAmt] = useState("");
+  const [day, setDay] = useState("1");
+  const add = () => {
+    const cents = C.parseDollars(amt);
+    if (!name.trim() || cents == null || cents <= 0) return;
+    const d = Math.max(1, Math.min(31, parseInt(day, 10) || 1));
+    setSetting("commitments", [...list, { id: "cm" + Date.now(), name: name.trim().slice(0, 40), amount: cents, dueDay: d }]);
+    setName(""); setAmt(""); setDay("1");
+  };
+  const remove = (id) => setSetting("commitments", list.filter((c) => c.id !== id));
+  const total = list.reduce((s, c) => s + c.amount, 0);
+  return /* @__PURE__ */ React.createElement("div", null,
+    /* @__PURE__ */ React.createElement("div", { className: "sub", style: { marginTop: 0, marginBottom: 12 } }, "Rent, subscriptions, insurance — anything you know is coming out. Stash holds back what's still due this month before it says you can spend."),
+    list.length > 0 && /* @__PURE__ */ React.createElement("div", { className: "cm-list" }, list.map((c) => /* @__PURE__ */ React.createElement("div", { key: c.id, className: "cm-row" }, /* @__PURE__ */ React.createElement("span", { className: "cm-name" }, c.name), /* @__PURE__ */ React.createElement("span", { className: "cm-meta" }, money(c.amount), " · day ", c.dueDay), /* @__PURE__ */ React.createElement("button", { className: "cm-del", onClick: () => remove(c.id), "aria-label": "Remove " + c.name }, "×")))),
+    /* @__PURE__ */ React.createElement("div", { className: "cm-add" },
+      /* @__PURE__ */ React.createElement("input", { className: "cm-in cm-name-in", placeholder: "Name (e.g. Rent)", value: name, onChange: (e) => setName(e.target.value) }),
+      /* @__PURE__ */ React.createElement("input", { className: "cm-in cm-amt-in", type: "number", inputMode: "decimal", placeholder: "$", value: amt, onChange: (e) => setAmt(e.target.value) }),
+      /* @__PURE__ */ React.createElement("input", { className: "cm-in cm-day-in", type: "number", inputMode: "numeric", min: 1, max: 31, placeholder: "Day", value: day, onChange: (e) => setDay(e.target.value) }),
+      /* @__PURE__ */ React.createElement("button", { className: "btn primary cm-addbtn", onClick: add }, "Add")),
+    total > 0 && /* @__PURE__ */ React.createElement("div", { className: "hint", style: { marginTop: 10 } }, money(total), "/mo committed across ", list.length, " item", list.length === 1 ? "" : "s", "."));
 }
 function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, syncInfo, runSync, bootUnlocked }) {
   const { categories, settings, overrides, sinkingFunds } = data;
@@ -4392,9 +4445,13 @@ function SimpleHome(p) {
   const askRef = useRef(null);
   const cents = C.parseDollars(amt.replace(/\.$/, ""));
   const leniency = C.bucketLeniency(bucket);
+  // money still owed this month to recurring/upcoming bills (due today or later)
+  const todayDay = +TODAY.slice(8, 10);
+  const reservedC = (settings.commitments || []).reduce((s, c) => (c.amount > 0 && (c.dueDay || 1) >= todayDay ? s + c.amount : s), 0);
   const v = cents != null && cents > 0 && bucket ? C.simpleVerdict(cents, monthNet, projectedEnd, perDay, leniency, {
     bank: availableNow,
     floor: settings.balanceFloor || 0,
+    reserved: reservedC,
     cushion: totalCushion,
     burn,
     targetRunway: settings.targetRunway,
@@ -4466,6 +4523,11 @@ function SimpleHome(p) {
       head: "Your call.",
       sub: "That's a big bite of your cash for a want \u2014 you'd have " + money(v.bankAfter || 0) + " left in the bank."
     },
+    reserved: {
+      ic: "\u25b3",
+      head: "Your call.",
+      sub: "This dips into the " + money(v.reservedAfter || 0) + " set aside for bills still due this month \u2014 you'd have " + money(v.bankAfter || 0) + " in the bank."
+    },
     ok: {
       ic: "\u2713",
       head: "Spend it.",
@@ -4518,7 +4580,7 @@ function SimpleHome(p) {
     },
     /* @__PURE__ */ React.createElement("span", { className: "b-ic" }, b.icon),
     b.label
-  ))), cents != null && cents > 0 && !bucket && /* @__PURE__ */ React.createElement("div", { className: "hint", style: { textAlign: "center", marginTop: 8 } }, "Pick the category that fits — essentials get more slack, fun gets less."), v && monthNet > 0 && cents > 0 && /* @__PURE__ */ React.createElement("div", { className: "impact" }, /* @__PURE__ */ React.createElement("div", { className: "meter " + (v.verdict === "RED" ? "crit-track" : v.verdict === "AMBER" ? "warn-track" : "") }, /* @__PURE__ */ React.createElement("i", { style: { transform: "scaleX(" + Math.max(0, Math.min(1, v.leftAfter / monthNet)).toFixed(4) + ")" } })), /* @__PURE__ */ React.createElement("div", { className: "impact-cap" }, v.leftAfter >= 0 ? money(v.leftAfter) + " left this month after this" : money(-v.leftAfter) + " over for the month")), v && (v.verdict !== "RED" || bucket === "emergency" || bucket === "bills") && /* @__PURE__ */ React.createElement("div", { className: "verdict-stage", key: "stage-" + v.verdict + "-" + v.reason }, v.verdict === "RED" ? /* @__PURE__ */ React.createElement(StashAnim, null) : v.verdict === "GREEN" ? /* @__PURE__ */ React.createElement(SwipeAnim, null) : /* @__PURE__ */ React.createElement(CoinAnim, null)), v && /* @__PURE__ */ React.createElement("div", { key: "vd-" + v.verdict, className: "verdict " + v.verdict.toLowerCase(), role: "status" }, /* @__PURE__ */ React.createElement("span", { className: "v-ic" }, copy.ic), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("b", null, copy.head), /* @__PURE__ */ React.createElement("span", { className: "v-sub" }, copy.sub))), false, !v && /* @__PURE__ */ React.createElement("div", { className: "pocket-brand" }, /* @__PURE__ */ React.createElement(PocketMark, { size: 34 }), /* @__PURE__ */ React.createElement("div", { className: "pocket-tag" }, /* @__PURE__ */ React.createElement(TypeOn, { text: "What's in your stash?" })))), false && /* @__PURE__ */ React.createElement("div", { className: "tilerow jar-center" }, /* @__PURE__ */ React.createElement("div", { className: "minitile" }, /* @__PURE__ */ React.createElement("div", { className: "mt-label" }, "Saved up"), /* @__PURE__ */ React.createElement(AnimatedFmt0, { className: "mt-val", cents: savedTotal })), /* @__PURE__ */ React.createElement(Jar, { level: savingsLevel, size: 46, tid: "saved" }), /* @__PURE__ */ React.createElement("div", { className: "minitile" }, /* @__PURE__ */ React.createElement("div", { className: "mt-label" }, "Safety net"), /* @__PURE__ */ React.createElement("div", { className: "mt-val" }, runway === Infinity ? "\u2014" : runway.toFixed(1) + "mo"))), dataMonths.length > 1 ? null : false ? /* @__PURE__ */ React.createElement("section", { className: "card center" }, /* @__PURE__ */ React.createElement("div", { className: "empty" }, /* @__PURE__ */ React.createElement("span", { className: "e-ic" }, "\u{1F4B5}"), "Tap ", /* @__PURE__ */ React.createElement("b", null, "+"), " and log your first deposit.")) : null);
+  ))), cents != null && cents > 0 && !bucket && /* @__PURE__ */ React.createElement("div", { className: "hint", style: { textAlign: "center", marginTop: 8 } }, "Pick the category that fits — essentials get more slack, fun gets less."), reservedC > 0 && !v && /* @__PURE__ */ React.createElement("div", { className: "hint", style: { textAlign: "center", marginTop: 8 } }, money(reservedC), " held back for bills due later this month."), v && monthNet > 0 && cents > 0 && /* @__PURE__ */ React.createElement("div", { className: "impact" }, /* @__PURE__ */ React.createElement("div", { className: "meter " + (v.verdict === "RED" ? "crit-track" : v.verdict === "AMBER" ? "warn-track" : "") }, /* @__PURE__ */ React.createElement("i", { style: { transform: "scaleX(" + Math.max(0, Math.min(1, v.leftAfter / monthNet)).toFixed(4) + ")" } })), /* @__PURE__ */ React.createElement("div", { className: "impact-cap" }, v.leftAfter >= 0 ? money(v.leftAfter) + " left this month after this" : money(-v.leftAfter) + " over for the month")), v && (v.verdict !== "RED" || bucket === "emergency" || bucket === "bills") && /* @__PURE__ */ React.createElement("div", { className: "verdict-stage", key: "stage-" + v.verdict + "-" + v.reason }, v.verdict === "RED" ? /* @__PURE__ */ React.createElement(StashAnim, null) : v.verdict === "GREEN" ? /* @__PURE__ */ React.createElement(SwipeAnim, null) : /* @__PURE__ */ React.createElement(CoinAnim, null)), v && /* @__PURE__ */ React.createElement("div", { key: "vd-" + v.verdict, className: "verdict " + v.verdict.toLowerCase(), role: "status" }, /* @__PURE__ */ React.createElement("span", { className: "v-ic" }, copy.ic), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("b", null, copy.head), /* @__PURE__ */ React.createElement("span", { className: "v-sub" }, copy.sub))), false, !v && /* @__PURE__ */ React.createElement("div", { className: "pocket-brand" }, /* @__PURE__ */ React.createElement(PocketMark, { size: 34 }), /* @__PURE__ */ React.createElement("div", { className: "pocket-tag" }, /* @__PURE__ */ React.createElement(TypeOn, { text: "What's in your stash?" })))), false && /* @__PURE__ */ React.createElement("div", { className: "tilerow jar-center" }, /* @__PURE__ */ React.createElement("div", { className: "minitile" }, /* @__PURE__ */ React.createElement("div", { className: "mt-label" }, "Saved up"), /* @__PURE__ */ React.createElement(AnimatedFmt0, { className: "mt-val", cents: savedTotal })), /* @__PURE__ */ React.createElement(Jar, { level: savingsLevel, size: 46, tid: "saved" }), /* @__PURE__ */ React.createElement("div", { className: "minitile" }, /* @__PURE__ */ React.createElement("div", { className: "mt-label" }, "Safety net"), /* @__PURE__ */ React.createElement("div", { className: "mt-val" }, runway === Infinity ? "\u2014" : runway.toFixed(1) + "mo"))), dataMonths.length > 1 ? null : false ? /* @__PURE__ */ React.createElement("section", { className: "card center" }, /* @__PURE__ */ React.createElement("div", { className: "empty" }, /* @__PURE__ */ React.createElement("span", { className: "e-ic" }, "\u{1F4B5}"), "Tap ", /* @__PURE__ */ React.createElement("b", null, "+"), " and log your first deposit.")) : null);
 }
 function EnvelopeRow({ r, compact, onTap }) {
   const pct = r.planned > 0 ? r.spent / r.planned : r.spent > 0 ? 1 : 0;
@@ -5278,7 +5340,7 @@ function Settings(p) {
         }
       }
     ))
-  ), /* @__PURE__ */ React.createElement(Acc, { title: "App & data", cap: syncCfg && syncCfg.enabled ? "sync on" : "sync off" }, /* @__PURE__ */ React.createElement(
+  ), /* @__PURE__ */ React.createElement(Acc, { title: "Recurring & upcoming", cap: (settings.commitments || []).length ? (settings.commitments.length + " bill" + (settings.commitments.length === 1 ? "" : "s")) : "off" }, /* @__PURE__ */ React.createElement(CommitmentsSetup, { settings, setSetting })), /* @__PURE__ */ React.createElement(Acc, { title: "App & data", cap: syncCfg && syncCfg.enabled ? "sync on" : "sync off" }, /* @__PURE__ */ React.createElement(
     Acc,
     {
       title: "Sync across devices",
