@@ -3868,7 +3868,7 @@ function LockSetup({ settings, setSetting, data }) {
    non-sensitive connection metadata in settings.bankLinks — institution name,
    masked accounts, connectedAt — never a token or credential. Reused in
    onboarding and in Settings. ---- */
-function BankConnect({ settings, setSetting }) {
+function BankConnect({ settings, setSetting, disconnectBank }) {
   // The live default is the mock; a Settings toggle (bankProviderMode) switches
   // to the real SimpleFIN relay. The "mock" SIMULATES connections (no bank
   // login, no real data) — flagged loudly so it's never mistaken for real.
@@ -3973,6 +3973,10 @@ function BankConnect({ settings, setSetting }) {
       .catch(() => { setErr("That setup token didn't work. Link again at your bank and paste the new token."); setPhase("token"); });
   };
   const disconnect = (l) => {
+    // In Settings, disconnectBank also removes the account's imported
+    // income/spending/savings. In onboarding (no disconnectBank) there's no
+    // imported data yet, so just drop the card + revoke the token.
+    if (disconnectBank) { disconnectBank(l); return; }
     if (P && P.disconnect) { P.disconnect(l.connectionId).catch(() => {}); }
     setSetting("bankLinks", (settings.bankLinks || []).filter((x) => x.connectionId !== l.connectionId));
   };
@@ -4620,13 +4624,15 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     chosen.forEach((r) => {
       const id = "sf-" + r.id;
       seen2[id] = 1;
-      if (r.kind === "income") income2.push({ id, date: r.date, amount: r.cents, source: r.label || "Deposit", _m: Date.now() });
+      // tag with the source account so disconnecting a bank can remove its data
+      if (r.kind === "income") income2.push({ id, date: r.date, amount: r.cents, source: r.label || "Deposit", account: r.account || null, _m: Date.now() });
       else {
         txns2.push({
           id, date: r.date,
           amount: r.kind === "refund" ? -r.cents : r.cents,
           categoryId: r.kind === "transfer" ? null : r.categoryId || null,
           merchant: r.label || "",
+          account: r.account || null,
           _m: Date.now(),
           ...r.kind === "transfer" ? { isTransfer: 1 } : {}
         });
@@ -4638,6 +4644,32 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     });
     return { ...d, txns: txns2, income: income2, merchantMap: map, sfSeen: seen2, sfMap: { ...d.sfMap || {}, ...mapping || {} } };
   });
+  // Disconnect a bank AND remove the income/spending/savings it brought in.
+  // Per-account for the accounts that connection covered (tagged at import);
+  // if it was the LAST live connection, clear all bank-imported data + anchors
+  // so nothing orphaned lingers (also catches older untagged entries).
+  const disconnectBank = (link) => {
+    const cid = link.connectionId;
+    const allLinks = (data.settings && data.settings.bankLinks) || [];
+    const names = {};
+    allLinks.filter((l) => l.connectionId === cid).forEach((l) => (l.accounts || []).forEach((a) => { if (a && a.name) names[a.name] = 1; }));
+    const lastConn = allLinks.filter((l) => l.connectionId !== cid && (l.provider === "simplefin" || l.provider === "plaid")).length === 0;
+    const P = window.BankProviderRelay || window.BankProvider;
+    if (P && P.disconnect) P.disconnect(cid).catch(() => {});
+    setData((d) => {
+      const isBank = (e) => e && typeof e.id === "string" && e.id.indexOf("sf-") === 0;
+      const drop = (e) => lastConn ? isBank(e) : (e && e.account && names[e.account]);
+      const removedIds = [];
+      const keep = (arr) => (arr || []).filter((e) => { if (drop(e)) { if (e && e.id) removedIds.push(e.id); return false; } return true; });
+      const txns = keep(d.txns), income = keep(d.income);
+      const sfMap = lastConn ? {} : (() => { const m = { ...(d.sfMap || {}) }; Object.keys(names).forEach((n) => delete m[n]); return m; })();
+      const sfSeen = { ...(d.sfSeen || {}) }; removedIds.forEach((id) => delete sfSeen[id]);
+      const settings = { ...d.settings, bankLinks: (d.settings.bankLinks || []).filter((x) => x.connectionId !== cid) };
+      if (lastConn) { delete settings.bankAnchor; delete settings.savingsAnchor; }
+      return { ...d, settings, txns, income, sfMap, sfSeen };
+    });
+    setSfBal((prev) => lastConn ? [] : (prev || []).filter((b) => !(b && names[b.account])));
+  };
   // bank savings activity (round-ups, transfers, interest) — display-only:
   // these are already counted through the savings BALANCE, never re-imported
   const savingsFeed = useMemo(() => {
@@ -6054,7 +6086,7 @@ function Settings(p) {
         }
       }
     ))
-  ), /* @__PURE__ */ React.createElement(Acc, { title: tr("set_banks"), cap: (settings.bankLinks || []).length ? ((settings.bankLinks.length) + " bank" + (settings.bankLinks.length === 1 ? "" : "s")) : tr("set_banks_none") }, /* @__PURE__ */ React.createElement("div", { className: "sub", style: { marginTop: 0, marginBottom: 12 } }, "Read-only connections. Stash can see balances and transactions — it can never move your money, and your data stays encrypted on this device."), syncCfg && syncCfg.enabled && /* @__PURE__ */ React.createElement("div", { className: "hint", style: { marginTop: 0, marginBottom: 12 } }, "Adding or removing a bank takes effect on this device right away. Your other devices catch up at the next sync — not instantly."), /* @__PURE__ */ React.createElement("div", { className: "bank-src" }, /* @__PURE__ */ React.createElement("span", null, "Connection source"), /* @__PURE__ */ React.createElement("select", { value: settings.bankProviderMode === "relay" || settings.bankProviderMode === "plaid" ? settings.bankProviderMode : "mock", onChange: (e) => setSetting("bankProviderMode", e.target.value), "aria-label": "Bank connection source" }, /* @__PURE__ */ React.createElement("option", { value: "mock" }, "Demo (simulated)"), /* @__PURE__ */ React.createElement("option", { value: "plaid" }, "Live · Plaid (tap & log in)"), /* @__PURE__ */ React.createElement("option", { value: "relay" }, "Live · SimpleFIN (paste token)"))), /* @__PURE__ */ React.createElement(BankConnect, { settings, setSetting })), /* @__PURE__ */ React.createElement(Acc, { title: "Recurring & upcoming", cap: (settings.commitments || []).length ? (settings.commitments.length + " item" + (settings.commitments.length === 1 ? "" : "s")) : "auto" }, /* @__PURE__ */ React.createElement(CommitmentsSetup, { settings, setSetting })), /* @__PURE__ */ React.createElement(Acc, { title: "App & data", cap: syncCfg && syncCfg.enabled ? "sync on" : "sync off" }, /* @__PURE__ */ React.createElement("div", { className: "lock-row", style: { marginTop: 0, marginBottom: 10 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 16, fontWeight: 700, letterSpacing: "-.01em", color: "var(--ink)" } }, tr("set_language")), /* @__PURE__ */ React.createElement("select", { value: settings.lang || "system", onChange: (e) => setSetting("lang", e.target.value), "aria-label": tr("set_language") }, /* @__PURE__ */ React.createElement("option", { value: "system" }, tr("set_language_system")), Object.keys(LANG_NAMES).map((code) => /* @__PURE__ */ React.createElement("option", { key: code, value: code }, LANG_NAMES[code])))), /* @__PURE__ */ React.createElement(
+  ), /* @__PURE__ */ React.createElement(Acc, { title: tr("set_banks"), cap: (settings.bankLinks || []).length ? ((settings.bankLinks.length) + " bank" + (settings.bankLinks.length === 1 ? "" : "s")) : tr("set_banks_none") }, /* @__PURE__ */ React.createElement("div", { className: "sub", style: { marginTop: 0, marginBottom: 12 } }, "Read-only connections. Stash can see balances and transactions — it can never move your money, and your data stays encrypted on this device."), syncCfg && syncCfg.enabled && /* @__PURE__ */ React.createElement("div", { className: "hint", style: { marginTop: 0, marginBottom: 12 } }, "Adding or removing a bank takes effect on this device right away. Your other devices catch up at the next sync — not instantly."), /* @__PURE__ */ React.createElement("div", { className: "bank-src" }, /* @__PURE__ */ React.createElement("span", null, "Connection source"), /* @__PURE__ */ React.createElement("select", { value: settings.bankProviderMode === "relay" || settings.bankProviderMode === "plaid" ? settings.bankProviderMode : "mock", onChange: (e) => setSetting("bankProviderMode", e.target.value), "aria-label": "Bank connection source" }, /* @__PURE__ */ React.createElement("option", { value: "mock" }, "Demo (simulated)"), /* @__PURE__ */ React.createElement("option", { value: "plaid" }, "Live · Plaid (tap & log in)"), /* @__PURE__ */ React.createElement("option", { value: "relay" }, "Live · SimpleFIN (paste token)"))), /* @__PURE__ */ React.createElement(BankConnect, { settings, setSetting, disconnectBank })), /* @__PURE__ */ React.createElement(Acc, { title: "Recurring & upcoming", cap: (settings.commitments || []).length ? (settings.commitments.length + " item" + (settings.commitments.length === 1 ? "" : "s")) : "auto" }, /* @__PURE__ */ React.createElement(CommitmentsSetup, { settings, setSetting })), /* @__PURE__ */ React.createElement(Acc, { title: "App & data", cap: syncCfg && syncCfg.enabled ? "sync on" : "sync off" }, /* @__PURE__ */ React.createElement("div", { className: "lock-row", style: { marginTop: 0, marginBottom: 10 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 16, fontWeight: 700, letterSpacing: "-.01em", color: "var(--ink)" } }, tr("set_language")), /* @__PURE__ */ React.createElement("select", { value: settings.lang || "system", onChange: (e) => setSetting("lang", e.target.value), "aria-label": tr("set_language") }, /* @__PURE__ */ React.createElement("option", { value: "system" }, tr("set_language_system")), Object.keys(LANG_NAMES).map((code) => /* @__PURE__ */ React.createElement("option", { key: code, value: code }, LANG_NAMES[code])))), /* @__PURE__ */ React.createElement(
     Acc,
     {
       title: "Sync across devices",
