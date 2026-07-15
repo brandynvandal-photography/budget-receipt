@@ -4444,10 +4444,18 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
   useEffect(() => {
     if (!sfBal || !sfBal.length) return;
     const roles = data.sfMap || {};
+    // Only count accounts that are STILL connected (present in a current
+    // bankLink). Disconnecting a bank drops its accounts here, so the anchor
+    // falls to reflect what's actually linked. Names come from the same relay
+    // account, so they match.
+    const live = {};
+    (settings.bankLinks || []).forEach((l) => (l.accounts || []).forEach((a) => { if (a && a.name) live[a.name] = 1; }));
+    const gate = Object.keys(live).length > 0;
     let bank = 0, bankTs = 0, haveBank = false;
     let save = 0, saveTs = 0, haveSave = false;
     sfBal.forEach((b) => {
       if (!b || !b.account) return;
+      if (gate && !live[b.account]) return; // skip disconnected accounts
       const cents = C.parseDollars(String(b.balance));
       if (cents == null) return;
       const ts = (+b.date || 0) * 1000;
@@ -4458,15 +4466,18 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
       const dd = new Date(ts), p = (n) => String(n).padStart(2, "0");
       return dd.getFullYear() + "-" + p(dd.getMonth() + 1) + "-" + p(dd.getDate());
     };
-    const upB = haveBank && bankTs > ((settings.bankAnchor || {})._ts || 0);
-    const upS = haveSave && saveTs > ((settings.savingsAnchor || {})._ts || 0);
+    const curB = settings.bankAnchor || {}, curS = settings.savingsAnchor || {};
+    // update on a newer reading OR when the live total changed (e.g. a
+    // disconnect lowered it) — so the balance never stays stuck high.
+    const upB = haveBank && (bankTs > (curB._ts || 0) || bank !== curB.cents);
+    const upS = haveSave && (saveTs > (curS._ts || 0) || save !== curS.cents);
     if (!upB && !upS) return;
     setData((d) => ({ ...d, settings: {
       ...d.settings,
-      ...upB ? { bankAnchor: { cents: bank, asOf: iso(bankTs), _ts: bankTs } } : {},
-      ...upS ? { savingsAnchor: { cents: save, asOf: iso(saveTs), _ts: saveTs } } : {}
+      ...upB ? { bankAnchor: { cents: bank, asOf: iso(bankTs || Date.now()), _ts: Math.max(bankTs, (curB._ts || 0)) } } : {},
+      ...upS ? { savingsAnchor: { cents: save, asOf: iso(saveTs || Date.now()), _ts: Math.max(saveTs, (curS._ts || 0)) } } : {}
     } }));
-  }, [sfBal, data.sfMap, settings.bankAnchor, settings.savingsAnchor, setData]);
+  }, [sfBal, data.sfMap, settings.bankLinks, settings.bankAnchor, settings.savingsAnchor, setData]);
   // Balance history: each nightly pull is a commit — git history of the
   // inbox file is a day-by-day balance series. Ingest unseen commits into
   // data.sfHist { "YYYY-MM-DD": { bank, save } } (synced, capped).
