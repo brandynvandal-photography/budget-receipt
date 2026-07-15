@@ -5346,7 +5346,7 @@ function Settings(p) {
         }
       }
     }
-  )), /* @__PURE__ */ React.createElement("button", { className: "btn danger-quiet", onClick: () => {
+  )), /* @__PURE__ */ React.createElement("button", { className: "btn quiet", style: { marginTop: 8 }, onClick: () => setSetting("onboarded", false) }, "Replay welcome tour"), /* @__PURE__ */ React.createElement("div", { className: "hint", style: { marginTop: 6, marginBottom: 2 } }, "Walks you through the welcome again — your transactions, income, savings, and settings stay exactly as they are."), /* @__PURE__ */ React.createElement("button", { className: "btn danger-quiet", onClick: () => {
     if (resetArmed) { setResetArmed(false); try { localStorage.removeItem("budget:sync:v1"); } catch (e) {} STORE.wipe().finally(() => location.reload()); }
     else { setResetArmed(true); setTimeout(() => setResetArmed(false), 3e3); }
   } }, resetArmed ? "Tap again to erase everything" : "Start over")), importErr && /* @__PURE__ */ React.createElement("div", { className: "verdict red", style: { marginTop: 10 } }, /* @__PURE__ */ React.createElement("span", { className: "v-ic" }, "✕"), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("b", null, "Couldn't read that file"), /* @__PURE__ */ React.createElement("span", { className: "v-sub" }, "It wasn't a valid backup — your current data is untouched.")))), /* @__PURE__ */ React.createElement(
