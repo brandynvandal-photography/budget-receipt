@@ -3515,7 +3515,7 @@ function CommitmentsSetup({ settings, setSetting }) {
   const remove = (id) => setSetting("commitments", list.filter((c) => c.id !== id));
   const total = list.reduce((s, c) => s + c.amount, 0);
   return /* @__PURE__ */ React.createElement("div", null,
-    /* @__PURE__ */ React.createElement("div", { className: "sub", style: { marginTop: 0, marginBottom: 12 } }, "Rent, subscriptions, insurance — anything you know is coming out. Stash holds back what's still due this month before it says you can spend."),
+    /* @__PURE__ */ React.createElement("div", { className: "sub", style: { marginTop: 0, marginBottom: 12 } }, "For upcoming or one-off costs the bank hasn't seen yet. Recurring bills you already pay are detected automatically from your Bills category — no need to re-enter those."),
     list.length > 0 && /* @__PURE__ */ React.createElement("div", { className: "cm-list" }, list.map((c) => /* @__PURE__ */ React.createElement("div", { key: c.id, className: "cm-row" }, /* @__PURE__ */ React.createElement("span", { className: "cm-name" }, c.name), /* @__PURE__ */ React.createElement("span", { className: "cm-meta" }, money(c.amount), " · day ", c.dueDay), /* @__PURE__ */ React.createElement("button", { className: "cm-del", onClick: () => remove(c.id), "aria-label": "Remove " + c.name }, "×")))),
     /* @__PURE__ */ React.createElement("div", { className: "cm-add" },
       /* @__PURE__ */ React.createElement("input", { className: "cm-in cm-name-in", placeholder: "Name (e.g. Rent)", value: name, onChange: (e) => setName(e.target.value) }),
@@ -4448,9 +4448,17 @@ function SimpleHome(p) {
   const askRef = useRef(null);
   const cents = C.parseDollars(amt.replace(/\.$/, ""));
   const leniency = C.bucketLeniency(bucket);
-  // money still owed this month to recurring/upcoming bills (due today or later)
+  // Money owed but not yet spent this month, reserved before we say you can
+  // spend. Two sources: (1) manual upcoming/one-off items you enter, still due
+  // today-or-later; (2) recurring bills DETECTED automatically from spending
+  // you or the bank tag "Bills" — reserve what a typical month still has coming.
   const todayDay = +TODAY.slice(8, 10);
-  const reservedC = (settings.commitments || []).reduce((s, c) => (c.amount > 0 && (c.dueDay || 1) >= todayDay ? s + c.amount : s), 0);
+  const manualReserveC = (settings.commitments || []).reduce((s, c) => (c.amount > 0 && (c.dueDay || 1) >= todayDay ? s + c.amount : s), 0);
+  const billsInMonth = (m) => txns.reduce((s, t) => (t.categoryId === "bills" && !t.isTransfer && C.monthOf(t.date) === m ? s + t.amount : s), 0);
+  const recentBillMonths = (dataMonths || []).filter((m) => m < CURRENT_MONTH).slice(-3);
+  const billsTypical = recentBillMonths.length ? Math.round(recentBillMonths.reduce((s, m) => s + billsInMonth(m), 0) / recentBillMonths.length) : 0;
+  const autoBillsC = Math.max(0, billsTypical - billsInMonth(CURRENT_MONTH));
+  const reservedC = manualReserveC + autoBillsC;
   const v = cents != null && cents > 0 && bucket ? C.simpleVerdict(cents, monthNet, projectedEnd, perDay, leniency, {
     bank: availableNow,
     floor: settings.balanceFloor || 0,
@@ -5343,7 +5351,7 @@ function Settings(p) {
         }
       }
     ))
-  ), /* @__PURE__ */ React.createElement(Acc, { title: "Recurring & upcoming", cap: (settings.commitments || []).length ? (settings.commitments.length + " bill" + (settings.commitments.length === 1 ? "" : "s")) : "off" }, /* @__PURE__ */ React.createElement(CommitmentsSetup, { settings, setSetting })), /* @__PURE__ */ React.createElement(Acc, { title: "App & data", cap: syncCfg && syncCfg.enabled ? "sync on" : "sync off" }, /* @__PURE__ */ React.createElement(
+  ), /* @__PURE__ */ React.createElement(Acc, { title: "Recurring & upcoming", cap: (settings.commitments || []).length ? (settings.commitments.length + " item" + (settings.commitments.length === 1 ? "" : "s")) : "auto" }, /* @__PURE__ */ React.createElement(CommitmentsSetup, { settings, setSetting })), /* @__PURE__ */ React.createElement(Acc, { title: "App & data", cap: syncCfg && syncCfg.enabled ? "sync on" : "sync off" }, /* @__PURE__ */ React.createElement(
     Acc,
     {
       title: "Sync across devices",
