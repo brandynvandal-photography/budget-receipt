@@ -3901,6 +3901,46 @@ function LockSetup({ settings, setSetting, data }) {
     /* @__PURE__ */ React.createElement("div", { className: "lock-row" }, /* @__PURE__ */ React.createElement("span", null, "Auto-lock"), /* @__PURE__ */ React.createElement("select", { value: rec.autoLockSec == null ? 30 : rec.autoLockSec, onChange: (e) => setSetting("lock", { ...rec, autoLockSec: +e.target.value }) }, /* @__PURE__ */ React.createElement("option", { value: 0 }, "Immediately"), /* @__PURE__ */ React.createElement("option", { value: 30 }, "After 30s away"), /* @__PURE__ */ React.createElement("option", { value: 60 }, "After 1 min"), /* @__PURE__ */ React.createElement("option", { value: 300 }, "After 5 min"))),
     /* @__PURE__ */ React.createElement("div", { className: "btn-row", style: { marginTop: 12 } }, /* @__PURE__ */ React.createElement("button", { className: "btn quiet", onClick: () => setMode("change") }, "Change PIN"), /* @__PURE__ */ React.createElement("button", { className: "btn danger-quiet", onClick: () => setMode("off") }, "Turn off")));
 }
+// Mandatory app lock: once a real bank is connected, financial data is present,
+// so the app requires a PIN before it can be opened. Full-screen, unskippable —
+// the only alternatives are to set a PIN or to remove the bank connection. Uses
+// the same PIN-creation + at-rest-encryption path as the optional LockSetup.
+function LockRequired({ data, setSetting, onRemoveBanks }) {
+  const [p1, setP1] = useState("");
+  const [p2, setP2] = useState("");
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  const okPin = (s) => /^\d{6}$/.test(s);
+  const enable = async () => {
+    if (!okPin(p1)) return setMsg("Choose a 6-digit PIN.");
+    if (p1 !== p2) return setMsg("Those PINs don't match.");
+    setBusy(true);
+    try {
+      const r = await PinLock.create(p1);
+      await STORE.enableEncryption(p1, { ...data, settings: { ...(data.settings || {}), lock: r } });
+      setSetting("lock", r);
+    } catch (e) { setBusy(false); setMsg("Couldn't set the PIN — try again."); return; }
+    setBusy(false);
+  };
+  const field = (val, set, ph) => /* @__PURE__ */ React.createElement("input", { className: "lk-input", type: "password", inputMode: "numeric", autoComplete: "off", maxLength: 6, placeholder: ph, value: val, onChange: (e) => { set(e.target.value.replace(/\D/g, "")); setMsg(""); } });
+  return /* @__PURE__ */ React.createElement("div", { className: "onboard" },
+    /* @__PURE__ */ React.createElement("div", { className: "ob-card" },
+      /* @__PURE__ */ React.createElement(PocketMark, { size: 44 }),
+      /* @__PURE__ */ React.createElement("div", { className: "ob-eyebrow" }, "Required"),
+      /* @__PURE__ */ React.createElement("h1", { className: "ob-h" }, "Lock your bank data"),
+      /* @__PURE__ */ React.createElement("p", { className: "ob-p" }, "You've connected a bank, so Stash needs a 6-digit PIN. Your data is encrypted with it and stays on this device."),
+      /* @__PURE__ */ React.createElement("div", { className: "ob-fields" }, field(p1, setP1, "New 6-digit PIN"), field(p2, setP2, "Confirm PIN")),
+      msg ? /* @__PURE__ */ React.createElement("div", { className: "hint", style: { color: "var(--crit)", textAlign: "center" } }, msg) : null,
+      /* @__PURE__ */ React.createElement("div", { className: "ob-actions" },
+        /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: enable, disabled: busy }, busy ? "Setting…" : "Set PIN & continue"),
+        confirmRemove
+          ? /* @__PURE__ */ React.createElement("button", { className: "btn danger-quiet", onClick: onRemoveBanks }, "Tap again to remove bank & skip")
+          : /* @__PURE__ */ React.createElement("button", { className: "ob-back", onClick: () => { setConfirmRemove(true); setTimeout(() => setConfirmRemove(false), 3000); } }, "Remove bank connections instead")
+      )
+    )
+  );
+}
 /* ---- First run: a short, honest welcome. Includes a notice-at-collection
    (privacy) step and the two settings that make the decider useful. Only a
    brand-new install sees it. ---- */
@@ -5098,6 +5138,11 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
   const effTab = simpleMode && (tab === "budget" || tab === "funds") ? "home" : tab;
   if (locked && lockRec && lockRec.enabled) return /* @__PURE__ */ React.createElement(LockGate, { lockRec, onUnlock: () => setLocked(false), onForgot: () => { try { localStorage.removeItem("budget:sync:v1"); } catch (e) {} STORE.wipe().finally(() => location.reload()); } });
   if (!settings.onboarded) return /* @__PURE__ */ React.createElement(Onboarding, { settings, setSetting, setTab });
+  // Mandatory lock once a real bank (SimpleFIN/Plaid) is connected — the app
+  // holds financial data, so it can't be opened without a PIN. Demo/mock
+  // connections don't count. Escape is to remove the bank connection.
+  const bankConnected = (settings.bankLinks || []).some((l) => l && (l.provider === "simplefin" || l.provider === "plaid"));
+  if (bankConnected && !(lockRec && lockRec.enabled)) return /* @__PURE__ */ React.createElement(LockRequired, { data, setSetting, onRemoveBanks: () => setSetting("bankLinks", (settings.bankLinks || []).filter((l) => !(l && (l.provider === "simplefin" || l.provider === "plaid")))) });
   return /* @__PURE__ */ React.createElement("div", { className: "shell" }, /* @__PURE__ */ React.createElement("header", { className: "top" }, /* @__PURE__ */ React.createElement(LogoMark, null)), month !== CURRENT_MONTH && effTab === "trends" && /* @__PURE__ */ React.createElement("button", { className: "backnow", onClick: () => setMonth(CURRENT_MONTH) }, "Viewing ", monthLabel(month), " \xB7 back to ", monthLabel(CURRENT_MONTH), " \u2192"), /* @__PURE__ */ React.createElement("div", { key: effTab, className: "tab-pane" }, effTab === "home" && (simpleMode ? /* @__PURE__ */ React.createElement(SimpleHome, { ...shared, ...{ setSetting, addTxn, addIncome, openAdd: (init) => { setSheetInit(init); setSheetKind("spend"); setSheetOpen(true); } } }) : /* @__PURE__ */ React.createElement(Home, { ...shared })), effTab === "budget" && /* @__PURE__ */ React.createElement(Budget, { ...shared }), effTab === "activity" && /* @__PURE__ */ React.createElement(
     Activity,
     {
