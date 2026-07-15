@@ -4244,13 +4244,18 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     const id = "recinc-" + CURRENT_MONTH;
     const amt = settings.monthlyIncome || 0;
     if (bankTruth) {
-      // Bank-truth: once a bank is connected, income is REAL bank deposits only,
-      // in EVERY month. Plan entries (recinc-*, materialized month-by-month before
-      // the bank was connected) are never counted as income — they inflated the
-      // month-by-month history and showed up as a stale, undeletable "Monthly
-      // income (plan)" line. The plan target is surfaced separately as the
-      // "Monthly plan income /mo" header, not as a deposit.
-      return incomeRaw.filter((e) => !String(e.id).startsWith("recinc-"));
+      // Split at the bank's start date. PRE-BANK months (before the feed has any
+      // data) are history the user recorded by hand/plan — keep their income
+      // (spending is likewise preserved on the OUT side). BANK-COVERED months use
+      // REAL deposits only: the plan (recinc-*) is dropped there so it never
+      // double-counts with backfilled paychecks or shows as a stale "Monthly
+      // income (plan)" line. Boundary = earliest date the bank has any data
+      // (a real deposit or a bank-tagged transaction).
+      let bankStart = null;
+      const mark = (e) => { if (e && e.date && (e.account || String(e.id).indexOf("sf-") === 0) && (bankStart == null || e.date < bankStart)) bankStart = e.date; };
+      incomeRaw.forEach(mark); txnsRaw.forEach(mark);
+      const bankStartMonth = bankStart ? C.monthOf(bankStart) : CURRENT_MONTH;
+      return incomeRaw.filter((e) => String(e.id).indexOf("recinc-") !== 0 || C.monthOf(e.date) < bankStartMonth);
     }
     if (amt <= 0) return incomeRaw;
     const deadTs = ((data.deleted || {}).income || []).reduce((mx, x) => {
@@ -4266,7 +4271,7 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     });
     if (!found) out.push({ id, date: CURRENT_MONTH + "-01", amount: amt, source: "Monthly income" });
     return out;
-  }, [incomeRaw, settings.monthlyIncome, settings.planTs, data.deleted, data.sfMap]);
+  }, [incomeRaw, txnsRaw, settings.monthlyIncome, settings.planTs, data.deleted, data.sfMap]);
   const merchantMap = data.merchantMap || {};
   const txns = useMemo(() => {
     // Derive, don't store — OUT side (mirror of the income fix): the current
