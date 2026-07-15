@@ -4270,6 +4270,27 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
       live = false;
     };
   }, [syncCfg]);
+  // Relay key backup: the relay's on-device secrets (userSecret = identity,
+  // vaultKey = the key that unwraps bank tokens) live in localStorage, so a
+  // reinstall/new device would orphan every bank connection. Mirror them into
+  // settings.relayKeys — which rides the app's E2E-encrypted sync + export — and
+  // restore localStorage from it on a fresh device. Runs BEFORE the fetch effect
+  // (defined above it) so a synced-in device has its keys back before any relay
+  // call; keep() would otherwise mint NEW keys and fail to decrypt. The vaultKey
+  // is only ever stored encrypted (app-at-rest AES-GCM + E2E in sync); the relay
+  // still never sees it at rest.
+  useEffect(() => {
+    const NAMES = { userSecret: "stash.relay.userSecret", vaultKey: "stash.relay.vaultKey" };
+    const stored = settings.relayKeys || {};
+    const next = { ...stored };
+    let changed = false;
+    Object.keys(NAMES).forEach((k) => {
+      const ls = localStorage.getItem(NAMES[k]);
+      if (ls && !stored[k]) { next[k] = ls; changed = true; }              // back up a newly-minted local key
+      else if (!ls && stored[k]) { try { localStorage.setItem(NAMES[k], stored[k]); } catch (e) {} } // restore onto a fresh device
+    });
+    if (changed) setSetting("relayKeys", next);
+  }, [settings.relayKeys, settings.bankLinks]);
   // Relay (SimpleFIN) on-demand sync: when the app is open and there are live
   // relay connections, pull transactions + balances and feed them into the SAME
   // inbox state the GitHub SimpleFIN Action uses — so role auto-assignment,
