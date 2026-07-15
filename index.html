@@ -3442,7 +3442,41 @@ function DragSheetShell({ close, children }) {
       el.style.transform = "";
     }
   };
-  return /* @__PURE__ */ React.createElement("div", { className: "sheet", ref }, /* @__PURE__ */ React.createElement("div", { className: "grab-zone", onTouchStart: start, onTouchMove: move, onTouchEnd: end, onTouchCancel: end }, /* @__PURE__ */ React.createElement("div", { className: "grabber" })), children);
+  // Capture the element that opened the sheet at first render — before focus is
+  // moved into the dialog — so we can hand focus back on close.
+  const opener = useRef(null);
+  if (opener.current === null && typeof document !== "undefined") opener.current = document.activeElement;
+  // a11y: present the sheet as a modal dialog — label it from its heading, move
+  // focus into it on open, trap Tab inside, close on Escape, and restore focus
+  // to whatever opened it on close. Covers every sheet (Add + bank Inbox).
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const h = el.querySelector("h3");
+    if (h) { if (!h.id) h.id = "sheet-title-" + Math.random().toString(36).slice(2, 8); el.setAttribute("aria-labelledby", h.id); }
+    const focusables = () => Array.prototype.slice.call(el.querySelectorAll('a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])')).filter((n) => n.offsetParent !== null || n.getClientRects().length);
+    try { el.focus(); } catch (e) {}
+    const onKey = (e) => {
+      if (e.key === "Escape") { e.preventDefault(); close(); return; }
+      if (e.key !== "Tab") return;
+      const f = focusables();
+      if (!f.length) { e.preventDefault(); el.focus(); return; }
+      const a = f[0], b = f[f.length - 1];
+      if (e.shiftKey && (document.activeElement === a || document.activeElement === el)) { e.preventDefault(); b.focus(); }
+      else if (!e.shiftKey && document.activeElement === b) { e.preventDefault(); a.focus(); }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      // Hand focus back to whatever opened the sheet. This cleanup runs in the
+      // passive phase — after React has removed the sheet's DOM (which drops
+      // focus to <body>) — so a synchronous focus() lands correctly and, unlike
+      // requestAnimationFrame, still fires if the tab isn't foregrounded.
+      const t = opener.current;
+      if (t && t.focus && t.isConnected) { try { t.focus(); } catch (e) {} }
+    };
+  }, []);
+  return /* @__PURE__ */ React.createElement("div", { className: "sheet", ref, role: "dialog", "aria-modal": "true", tabIndex: -1 }, /* @__PURE__ */ React.createElement("div", { className: "grab-zone", onTouchStart: start, onTouchMove: move, onTouchEnd: end, onTouchCancel: end }, /* @__PURE__ */ React.createElement("div", { className: "grabber" })), children);
 }
 // FAB: tap = add (contextual default, unchanged). Long-press = speed-dial
 // fan with Spend / Income / Stash shortcuts. Tap adds no friction to the
@@ -4160,12 +4194,23 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     const id = "recinc-" + CURRENT_MONTH;
     const amt = settings.monthlyIncome || 0;
     if (bankTruth) {
-      // bank-truth: IN includes the monthly plan as a gap-fill — the plan
-      // entry is worth (plan − real deposits this month), so IN shows the
-      // full plan now and shrinks 1:1 as real paychecks land. No doubles.
-      const base = incomeRaw.filter((e) => e.id !== id);
+      // bank-truth: the bank feed is the source of truth. For any PAST month the
+      // bank actually reported deposits, the plan's materialized deposit stands
+      // down — otherwise that month double-counts plan + real (the plan entries
+      // were materialized month-by-month before the bank was ever connected, so
+      // once the feed backfills real paychecks the two collide). Months the bank
+      // never covered keep their plan entry as the only record. The CURRENT month
+      // gap-fills: IN shows the full plan now and shrinks 1:1 as paychecks land.
+      const realByMonth = {};
+      incomeRaw.forEach((e) => { if (!String(e.id).startsWith("recinc-")) { const m = C.monthOf(e.date); realByMonth[m] = (realByMonth[m] || 0) + e.amount; } });
+      const base = incomeRaw.filter((e) => {
+        if (!String(e.id).startsWith("recinc-")) return true;   // real deposits always kept
+        const m = C.monthOf(e.date);
+        if (m === CURRENT_MONTH) return false;                  // current month handled below
+        return !(realByMonth[m] > 0);                           // drop plan for months the bank covered
+      });
       if (amt <= 0) return base;
-      const real = base.reduce((s, e) => s + (C.monthOf(e.date) === CURRENT_MONTH ? e.amount : 0), 0);
+      const real = realByMonth[CURRENT_MONTH] || 0;
       const gap = Math.max(0, amt - real);
       if (!gap) return base;
       return [...base, { id, date: CURRENT_MONTH + "-01", amount: gap, source: "Monthly income (plan)" }];
@@ -5644,7 +5689,7 @@ function Activity(p) {
   const saveList = txns.filter((t) => (showAll || C.monthOf(t.date) === month) && savingIds[t.categoryId] && matchTx(t)).slice().sort(sortFn);
   const incomeList = income.filter((e) => (showAll || C.monthOf(e.date) === month) && matchIn(e)).slice().sort(sortFn);
   const uncatFirst = spendList;
-  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h2", { className: "screen-title" }, "Activity"), billPrompt && /* @__PURE__ */ React.createElement("div", { className: "bill-toast" }, /* @__PURE__ */ React.createElement("div", { className: "bt-msg" }, "Is “", billPrompt.merchant, "” a recurring bill?"), /* @__PURE__ */ React.createElement("div", { className: "bt-row" }, /* @__PURE__ */ React.createElement("label", { className: "bt-day" }, "Comes out day ", /* @__PURE__ */ React.createElement("input", { type: "number", min: 1, max: 31, value: billPrompt.day, onChange: (e) => setBillPrompt({ ...billPrompt, day: Math.max(1, Math.min(31, +e.target.value || 1)) }) })), /* @__PURE__ */ React.createElement("div", { className: "bt-btns" }, /* @__PURE__ */ React.createElement("button", { className: "btn quiet", onClick: () => setBillPrompt(null) }, "One-time"), /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: addRecurringBill }, "Every month"))), /* @__PURE__ */ React.createElement("div", { className: "bt-sub" }, money(billPrompt.amount), " · held back every month until you remove it in Settings → Recurring & upcoming")), /* @__PURE__ */ React.createElement(Swiper, { labels: ["In the bank", "Saved up", "Safety net"] }, /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "In the bank"), p.availableNow != null ? /* @__PURE__ */ React.createElement(AnimatedMoneySplit, { cents: p.availableNow, className: "bank-val" + (p.availableNow < 0 ? " overspent" : "") }) : /* @__PURE__ */ React.createElement("div", { className: "bank-val", style: { opacity: 0.5 } }, "\u2014"), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, (p.settings.paycheck || {}).amount > 0 ? money(p.settings.paycheck.amount) + " per paycheck \u00b7 " + fmt0(monthSpendC) + " out \u00b7 " + monthLabel(month) : fmt0(monthIncomeC) + " in \u00b7 " + fmt0(monthSpendC) + " out \u00b7 " + monthLabel(month))), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "Saved up"), /* @__PURE__ */ React.createElement(AnimatedFmt0, { className: "bank-val", cents: p.savedTotal }), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, "Chime Savings + Fidelity")), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "Safety net"), /* @__PURE__ */ React.createElement("div", { className: "bank-val" }, p.runway === Infinity ? "\u2014" : p.runway.toFixed(1) + " mo"), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, "if income stopped"))), /* @__PURE__ */ React.createElement("div", { className: "seg" }, /* @__PURE__ */ React.createElement("button", { className: view === "spend" ? "on" : "", onClick: () => setView("spend") }, "Spending"), /* @__PURE__ */ React.createElement("button", { className: view === "income" ? "on" : "", onClick: () => setView("income") }, "Income"), /* @__PURE__ */ React.createElement("button", { className: view === "save" ? "on" : "", onClick: () => setView("save") }, "Savings")), /* @__PURE__ */ React.createElement("div", { className: "actbar" }, /* @__PURE__ */ React.createElement("select", { className: "actsort actmonth", value: showAll ? "all" : month, onChange: (e) => { const v = e.target.value; if (v === "all") setShowAll(true); else { setShowAll(false); setMonth(v); } }, "aria-label": "Filter by month" }, /* @__PURE__ */ React.createElement("option", { value: "all" }, "All months"), monthOptions.map((m) => /* @__PURE__ */ React.createElement("option", { key: m, value: m }, monthLabel(m)))), /* @__PURE__ */ React.createElement("input", { className: "actsearch", type: "search", inputMode: "search", placeholder: "\u{1F50D} Search", value: q, onChange: (e) => setQ(e.target.value) }), /* @__PURE__ */ React.createElement("select", { className: "actsort", value: sortBy, onChange: (e) => setSortBy(e.target.value), "aria-label": "Sort" }, /* @__PURE__ */ React.createElement("option", { value: "date" }, "Newest"), /* @__PURE__ */ React.createElement("option", { value: "amount" }, "Amount \u2193"))), view === "spend" && (() => {
+  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h2", { className: "screen-title" }, "Activity"), billPrompt && /* @__PURE__ */ React.createElement("div", { className: "bill-toast" }, /* @__PURE__ */ React.createElement("div", { className: "bt-msg" }, "Is “", billPrompt.merchant, "” a recurring bill?"), /* @__PURE__ */ React.createElement("div", { className: "bt-row" }, /* @__PURE__ */ React.createElement("label", { className: "bt-day" }, "Comes out day ", /* @__PURE__ */ React.createElement("input", { type: "number", min: 1, max: 31, value: billPrompt.day, onChange: (e) => setBillPrompt({ ...billPrompt, day: Math.max(1, Math.min(31, +e.target.value || 1)) }) })), /* @__PURE__ */ React.createElement("div", { className: "bt-btns" }, /* @__PURE__ */ React.createElement("button", { className: "btn quiet", onClick: () => setBillPrompt(null) }, "One-time"), /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: addRecurringBill }, "Every month"))), /* @__PURE__ */ React.createElement("div", { className: "bt-sub" }, money(billPrompt.amount), " · held back every month until you remove it in Settings → Recurring & upcoming")), /* @__PURE__ */ React.createElement(Swiper, { labels: ["In the bank", "Saved up", "Safety net"] }, /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "In the bank"), p.availableNow != null ? /* @__PURE__ */ React.createElement(AnimatedMoneySplit, { cents: p.availableNow, className: "bank-val" + (p.availableNow < 0 ? " overspent" : "") }) : /* @__PURE__ */ React.createElement("div", { className: "bank-val", style: { opacity: 0.5 } }, "\u2014"), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, (p.settings.paycheck || {}).amount > 0 ? money(p.settings.paycheck.amount) + " per paycheck \u00b7 " + fmt0(monthSpendC) + " out \u00b7 " + monthLabel(month) : fmt0(monthIncomeC) + " in \u00b7 " + fmt0(monthSpendC) + " out \u00b7 " + monthLabel(month))), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "Saved up"), /* @__PURE__ */ React.createElement(AnimatedFmt0, { className: "bank-val", cents: p.savedTotal }), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, "Chime Savings + Fidelity")), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "Safety net"), /* @__PURE__ */ React.createElement("div", { className: "bank-val" }, p.runway === Infinity ? "\u2014" : p.runway.toFixed(1) + " mo"), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, "if income stopped"))), /* @__PURE__ */ React.createElement("div", { className: "seg", role: "group", "aria-label": "Filter activity" }, /* @__PURE__ */ React.createElement("button", { className: view === "spend" ? "on" : "", "aria-pressed": view === "spend", onClick: () => setView("spend") }, "Spending"), /* @__PURE__ */ React.createElement("button", { className: view === "income" ? "on" : "", "aria-pressed": view === "income", onClick: () => setView("income") }, "Income"), /* @__PURE__ */ React.createElement("button", { className: view === "save" ? "on" : "", "aria-pressed": view === "save", onClick: () => setView("save") }, "Savings")), /* @__PURE__ */ React.createElement("div", { className: "actbar" }, /* @__PURE__ */ React.createElement("select", { className: "actsort actmonth", value: showAll ? "all" : month, onChange: (e) => { const v = e.target.value; if (v === "all") setShowAll(true); else { setShowAll(false); setMonth(v); } }, "aria-label": "Filter by month" }, /* @__PURE__ */ React.createElement("option", { value: "all" }, "All months"), monthOptions.map((m) => /* @__PURE__ */ React.createElement("option", { key: m, value: m }, monthLabel(m)))), /* @__PURE__ */ React.createElement("input", { className: "actsearch", type: "search", inputMode: "search", placeholder: "\u{1F50D} Search", value: q, onChange: (e) => setQ(e.target.value) }), /* @__PURE__ */ React.createElement("select", { className: "actsort", value: sortBy, onChange: (e) => setSortBy(e.target.value), "aria-label": "Sort" }, /* @__PURE__ */ React.createElement("option", { value: "date" }, "Newest"), /* @__PURE__ */ React.createElement("option", { value: "amount" }, "Amount \u2193"))), view === "spend" && (() => {
     const isBill = (t) => String(t.id || "").startsWith("recbill");
     const billRows = uncatFirst.filter(isBill);
     const manualRows = uncatFirst.filter((t) => !isBill(t));
