@@ -2905,6 +2905,143 @@ function todayISO() {
 }
 const TODAY = todayISO();
 const CURRENT_MONTH = TODAY.slice(0, 7);
+
+/* ---- i18n: follows the device language by default; the core experience is
+   translated into the most-spoken US languages, English as fallback. Deep
+   help/settings text stays English for now (extendable key by key). ---- */
+const LANG_NAMES = { en: "English", es: "Español", zh: "中文", vi: "Tiếng Việt", tl: "Tagalog", ko: "한국어" };
+const RTL_LANGS = {};
+const STRINGS = {
+  en: {
+    nav_home: "Home", nav_activity: "Activity", nav_trends: "Trends", nav_settings: "Settings",
+    ask_stash: "Stash", ask_or: "or", ask_spend: "spend", ask_ghost: "What's in your stash?",
+    v_stash: "Stash it.", v_spend: "Spend it.", v_yourcall: "Your call.", v_safetynet: "Use your safety net.",
+    lock_title: "Enter your PIN", lock_sub: "Stash is locked to keep your money private.",
+    lock_unlock_sub: "Enter your PIN to unlock Stash.", lock_forgot: "Forgot PIN?",
+    lock_erase_q: "Erase all data and start fresh? This can't be undone.", lock_erase: "Erase everything",
+    btn_add: "Add", btn_cancel: "Cancel", btn_notnow: "Not now", btn_save: "Save", btn_continue: "Continue", btn_back: "Back",
+    ob_welcome_h: "Welcome to Stash",
+    ob_welcome_p: "Stash answers one question — stash it, or spend it? — from what's really in your bank, not a guess.",
+    ob_getstarted: "Get started", ob_privacy_eyebrow: "Your privacy", ob_privacy_h: "Your money stays yours",
+    ob_priv1: "Your data lives on your device — not on our servers.",
+    ob_priv2: "Backups are end-to-end encrypted. We can't read them.",
+    ob_priv3: "Nothing is sold or shared. Export or erase it all, anytime.",
+    ob_priv4: "Stash is a decision tool — not licensed financial advice.",
+    ob_iunderstand: "I understand", ob_basics_h: "Two quick basics",
+    ob_ready_h: "You're all set", ob_start: "Start using Stash",
+    set_language: "Language", set_language_system: "System default"
+  },
+  es: {
+    nav_home: "Inicio", nav_activity: "Actividad", nav_trends: "Tendencias", nav_settings: "Ajustes",
+    ask_stash: "Guardar", ask_or: "o", ask_spend: "gastar", ask_ghost: "¿Qué hay en tu alcancía?",
+    v_stash: "Guárdalo.", v_spend: "Gástalo.", v_yourcall: "Tú decides.", v_safetynet: "Usa tu colchón.",
+    lock_title: "Ingresa tu PIN", lock_sub: "Stash está bloqueado para proteger tu dinero.",
+    lock_unlock_sub: "Ingresa tu PIN para desbloquear Stash.", lock_forgot: "¿Olvidaste tu PIN?",
+    lock_erase_q: "¿Borrar todos los datos y empezar de nuevo? No se puede deshacer.", lock_erase: "Borrar todo",
+    btn_add: "Añadir", btn_cancel: "Cancelar", btn_notnow: "Ahora no", btn_save: "Guardar", btn_continue: "Continuar", btn_back: "Atrás",
+    ob_welcome_h: "Bienvenido a Stash",
+    ob_welcome_p: "Stash responde una sola pregunta —¿guardar o gastar?— con lo que de verdad hay en tu banco, sin adivinar.",
+    ob_getstarted: "Empezar", ob_privacy_eyebrow: "Tu privacidad", ob_privacy_h: "Tu dinero es solo tuyo",
+    ob_priv1: "Tus datos viven en tu dispositivo, no en nuestros servidores.",
+    ob_priv2: "Las copias están cifradas de extremo a extremo. No podemos leerlas.",
+    ob_priv3: "Nada se vende ni se comparte. Exporta o borra todo cuando quieras.",
+    ob_priv4: "Stash es una herramienta de decisión, no asesoría financiera.",
+    ob_iunderstand: "Entiendo", ob_basics_h: "Dos datos rápidos",
+    ob_ready_h: "¡Todo listo!", ob_start: "Empezar a usar Stash",
+    set_language: "Idioma", set_language_system: "Predeterminado del sistema"
+  },
+  zh: {
+    nav_home: "首页", nav_activity: "记录", nav_trends: "趋势", nav_settings: "设置",
+    ask_stash: "存起来", ask_or: "还是", ask_spend: "花掉", ask_ghost: "你的存钱罐里有多少？",
+    v_stash: "先存着。", v_spend: "花吧。", v_yourcall: "你来定。", v_safetynet: "动用应急金。",
+    lock_title: "输入 PIN 码", lock_sub: "Stash 已锁定，保护你的隐私。",
+    lock_unlock_sub: "输入 PIN 码解锁 Stash。", lock_forgot: "忘记 PIN 码？",
+    lock_erase_q: "清除所有数据并重新开始？此操作无法撤销。", lock_erase: "清除全部",
+    btn_add: "添加", btn_cancel: "取消", btn_notnow: "暂不", btn_save: "保存", btn_continue: "继续", btn_back: "返回",
+    ob_welcome_h: "欢迎使用 Stash",
+    ob_welcome_p: "Stash 只回答一个问题——存起来还是花掉？——依据你银行里真实的余额，而不是猜测。",
+    ob_getstarted: "开始", ob_privacy_eyebrow: "你的隐私", ob_privacy_h: "你的钱只属于你",
+    ob_priv1: "你的数据存在你的设备上，不在我们的服务器。",
+    ob_priv2: "备份采用端到端加密，我们无法读取。",
+    ob_priv3: "绝不出售或分享。随时可导出或全部清除。",
+    ob_priv4: "Stash 是决策工具，并非持牌理财建议。",
+    ob_iunderstand: "我明白了", ob_basics_h: "两个小设置",
+    ob_ready_h: "都设置好了", ob_start: "开始使用 Stash",
+    set_language: "语言", set_language_system: "跟随系统"
+  },
+  vi: {
+    nav_home: "Trang chủ", nav_activity: "Hoạt động", nav_trends: "Xu hướng", nav_settings: "Cài đặt",
+    ask_stash: "Để dành", ask_or: "hay", ask_spend: "tiêu", ask_ghost: "Bạn để dành được bao nhiêu?",
+    v_stash: "Để dành đi.", v_spend: "Cứ tiêu.", v_yourcall: "Tùy bạn.", v_safetynet: "Dùng quỹ dự phòng.",
+    lock_title: "Nhập mã PIN", lock_sub: "Stash đã khóa để bảo mật tiền của bạn.",
+    lock_unlock_sub: "Nhập mã PIN để mở khóa Stash.", lock_forgot: "Quên mã PIN?",
+    lock_erase_q: "Xóa toàn bộ dữ liệu và bắt đầu lại? Không thể hoàn tác.", lock_erase: "Xóa tất cả",
+    btn_add: "Thêm", btn_cancel: "Hủy", btn_notnow: "Để sau", btn_save: "Lưu", btn_continue: "Tiếp tục", btn_back: "Quay lại",
+    ob_welcome_h: "Chào mừng đến Stash",
+    ob_welcome_p: "Stash trả lời một câu hỏi — để dành hay tiêu? — dựa trên số dư thật trong ngân hàng, không phải phỏng đoán.",
+    ob_getstarted: "Bắt đầu", ob_privacy_eyebrow: "Quyền riêng tư", ob_privacy_h: "Tiền của bạn là của bạn",
+    ob_priv1: "Dữ liệu nằm trên thiết bị của bạn, không phải máy chủ của chúng tôi.",
+    ob_priv2: "Bản sao lưu được mã hóa đầu-cuối. Chúng tôi không đọc được.",
+    ob_priv3: "Không bán hay chia sẻ. Xuất hoặc xóa hết bất cứ lúc nào.",
+    ob_priv4: "Stash là công cụ hỗ trợ quyết định, không phải tư vấn tài chính.",
+    ob_iunderstand: "Tôi hiểu", ob_basics_h: "Hai thông tin nhanh",
+    ob_ready_h: "Xong rồi!", ob_start: "Bắt đầu dùng Stash",
+    set_language: "Ngôn ngữ", set_language_system: "Theo hệ thống"
+  },
+  tl: {
+    nav_home: "Home", nav_activity: "Aktibidad", nav_trends: "Trends", nav_settings: "Mga Setting",
+    ask_stash: "Itago", ask_or: "o", ask_spend: "gastusin", ask_ghost: "Magkano ang naitago mo?",
+    v_stash: "Itago mo.", v_spend: "Gastusin mo.", v_yourcall: "Ikaw ang bahala.", v_safetynet: "Gamitin ang ipon mo.",
+    lock_title: "Ilagay ang PIN", lock_sub: "Naka-lock ang Stash para pribado ang pera mo.",
+    lock_unlock_sub: "Ilagay ang PIN para i-unlock ang Stash.", lock_forgot: "Nakalimutan ang PIN?",
+    lock_erase_q: "Burahin lahat ng data at magsimula ulit? Hindi ito maibabalik.", lock_erase: "Burahin lahat",
+    btn_add: "Idagdag", btn_cancel: "Kanselahin", btn_notnow: "Sa ibang pagkakataon", btn_save: "I-save", btn_continue: "Magpatuloy", btn_back: "Bumalik",
+    ob_welcome_h: "Maligayang pagdating sa Stash",
+    ob_welcome_p: "Sinasagot ng Stash ang isang tanong — itago o gastusin? — base sa totoong laman ng bangko mo, hindi hula.",
+    ob_getstarted: "Magsimula", ob_privacy_eyebrow: "Iyong privacy", ob_privacy_h: "Sa iyo lang ang pera mo",
+    ob_priv1: "Nasa device mo ang data, hindi sa aming server.",
+    ob_priv2: "Naka-end-to-end encrypt ang backup. Hindi namin ito mababasa.",
+    ob_priv3: "Walang ibinebenta o ibinabahagi. Puwedeng i-export o burahin anumang oras.",
+    ob_priv4: "Ang Stash ay tool sa pagdedesisyon, hindi lisensyadong payo sa pera.",
+    ob_iunderstand: "Naiintindihan ko", ob_basics_h: "Dalawang mabilis",
+    ob_ready_h: "Handa ka na!", ob_start: "Simulan ang Stash",
+    set_language: "Wika", set_language_system: "Depende sa system"
+  },
+  ko: {
+    nav_home: "홈", nav_activity: "활동", nav_trends: "추세", nav_settings: "설정",
+    ask_stash: "저축", ask_or: "아니면", ask_spend: "지출", ask_ghost: "얼마나 모았나요?",
+    v_stash: "저축하세요.", v_spend: "지출하세요.", v_yourcall: "선택은 당신 몫.", v_safetynet: "비상금을 쓰세요.",
+    lock_title: "PIN 입력", lock_sub: "돈을 안전하게 지키려고 Stash를 잠갔어요.",
+    lock_unlock_sub: "PIN을 입력해 Stash 잠금을 해제하세요.", lock_forgot: "PIN을 잊으셨나요?",
+    lock_erase_q: "모든 데이터를 지우고 새로 시작할까요? 되돌릴 수 없어요.", lock_erase: "전체 삭제",
+    btn_add: "추가", btn_cancel: "취소", btn_notnow: "나중에", btn_save: "저장", btn_continue: "계속", btn_back: "뒤로",
+    ob_welcome_h: "Stash에 오신 걸 환영해요",
+    ob_welcome_p: "Stash는 한 가지 질문에 답해요 — 저축할까, 쓸까? — 추측이 아니라 실제 잔액을 기준으로요.",
+    ob_getstarted: "시작하기", ob_privacy_eyebrow: "개인정보", ob_privacy_h: "당신의 돈은 당신 것",
+    ob_priv1: "데이터는 우리 서버가 아니라 당신 기기에 있어요.",
+    ob_priv2: "백업은 종단 간 암호화돼요. 우리도 못 읽어요.",
+    ob_priv3: "판매하거나 공유하지 않아요. 언제든 내보내거나 전부 지울 수 있어요.",
+    ob_priv4: "Stash는 결정 도구예요 — 공인 금융 자문이 아니에요.",
+    ob_iunderstand: "이해했어요", ob_basics_h: "간단한 두 가지",
+    ob_ready_h: "준비 완료!", ob_start: "Stash 시작하기",
+    set_language: "언어", set_language_system: "시스템 기본값"
+  }
+};
+function detectLang(pref) {
+  if (pref && pref !== "system" && STRINGS[pref]) return pref;
+  var list = (typeof navigator !== "undefined" && (navigator.languages || [navigator.language])) || ["en"];
+  for (var i = 0; i < list.length; i++) {
+    var base = String(list[i] || "").toLowerCase().split("-")[0];
+    if (base === "fil") base = "tl";
+    if (STRINGS[base]) return base;
+  }
+  return "en";
+}
+var CURRENT_LANG = "en";
+function tr(key) {
+  var d = STRINGS[CURRENT_LANG];
+  return (d && d[key]) || STRINGS.en[key] || key;
+}
 const money = (cents) => C.fmt(cents);
 function fmt0(cents) {
   const n = Math.round(Math.abs(cents) / 100).toLocaleString("en-US");
@@ -3150,7 +3287,7 @@ function FlipWord(props) {
   var verdict = props && props.verdict;
   var stashCls = "wm-stash" + (verdict === "RED" ? " wm-win" : verdict === "GREEN" ? " wm-dim" : "");
   var spendCls = "wm-spend" + (verdict === "GREEN" ? " wm-win" : verdict === "RED" ? " wm-dim" : "");
-  return /* @__PURE__ */ React.createElement("span", { className: "wordmark", "aria-label": "Stash or spend?" }, /* @__PURE__ */ React.createElement("span", { className: stashCls }, "Stash"), /* @__PURE__ */ React.createElement("span", { className: "wm-or" }, "or"), /* @__PURE__ */ React.createElement("span", { className: spendCls }, "spend"), /* @__PURE__ */ React.createElement("span", { className: "wm-q" }, "?"));
+  return /* @__PURE__ */ React.createElement("span", { className: "wordmark", "aria-label": tr("ask_stash") + " " + tr("ask_or") + " " + tr("ask_spend") + "?" }, /* @__PURE__ */ React.createElement("span", { className: stashCls }, tr("ask_stash")), /* @__PURE__ */ React.createElement("span", { className: "wm-or" }, tr("ask_or")), /* @__PURE__ */ React.createElement("span", { className: spendCls }, tr("ask_spend")), /* @__PURE__ */ React.createElement("span", { className: "wm-q" }, "?"));
 }
 // "your call" coin flip — AMBER verdict theater
 function CoinAnim() {
@@ -3275,6 +3412,15 @@ function App() {
   const [encEnv, setEncEnv] = useState(null);      // encrypted blob awaiting the PIN at boot
   const [bootUnlocked, setBootUnlocked] = useState(false);
   const [tab, setTab] = useState("home");
+  // resolve the UI language before children render (system default, or the
+  // user's override in Settings). t() reads CURRENT_LANG.
+  CURRENT_LANG = detectLang(data && data.settings && data.settings.lang);
+  useEffect(() => {
+    if (typeof document !== "undefined") {
+      document.documentElement.lang = CURRENT_LANG;
+      document.documentElement.dir = RTL_LANGS[CURRENT_LANG] ? "rtl" : "ltr";
+    }
+  }, [data && data.settings && data.settings.lang]);
   const [rev, setRev] = useState(0);
   const saveTimer = useRef(null);
   const dataRef = useRef(null);
@@ -3354,7 +3500,7 @@ function App() {
     });
   }, [runSync]);
   if (encEnv) return /* @__PURE__ */ React.createElement(LockGate, {
-    sub: "Enter your PIN to unlock Stash.",
+    sub: tr("lock_unlock_sub"),
     verify: async (pin) => {
       const raw = await STORE.unlock(pin, encEnv);
       if (!raw) return false;
@@ -3422,13 +3568,13 @@ function LockGate({ lockRec, verify, onUnlock, onForgot, sub }) {
   const keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "⌫"];
   return /* @__PURE__ */ React.createElement("div", { className: "lockgate" },
     /* @__PURE__ */ React.createElement("div", { className: "lock-brand" }, /* @__PURE__ */ React.createElement(PocketMark, { size: 44 })),
-    /* @__PURE__ */ React.createElement("div", { className: "lock-title" }, "Enter your PIN"),
-    /* @__PURE__ */ React.createElement("div", { className: "lock-sub" }, sub || "Stash is locked to keep your money private."),
+    /* @__PURE__ */ React.createElement("div", { className: "lock-title" }, tr("lock_title")),
+    /* @__PURE__ */ React.createElement("div", { className: "lock-sub" }, sub || tr("lock_sub")),
     /* @__PURE__ */ React.createElement("div", { className: "lock-dots" + (err ? " shake" : "") }, Array.from({ length: LOCK_LEN }).map((_, i) => /* @__PURE__ */ React.createElement("span", { key: i, className: "lock-dot" + (i < pin.length ? " on" : "") + (err ? " err" : "") }))),
     /* @__PURE__ */ React.createElement("div", { className: "lock-pad" }, keys.map((k, i) => k === "" ? /* @__PURE__ */ React.createElement("span", { key: i }) : /* @__PURE__ */ React.createElement("button", { key: i, className: "lock-key" + (k === "⌫" ? " ghost" : ""), onClick: k === "⌫" ? back : () => push(k), disabled: busy, "aria-label": k === "⌫" ? "Delete" : k }, k))),
     wipe
-      ? /* @__PURE__ */ React.createElement("div", { className: "lock-forgot" }, /* @__PURE__ */ React.createElement("div", { className: "lock-warn" }, "Erase all data and start fresh? This can't be undone."), /* @__PURE__ */ React.createElement("div", { className: "lock-forgot-row" }, /* @__PURE__ */ React.createElement("button", { className: "btn quiet", onClick: () => setWipe(false) }, "Cancel"), /* @__PURE__ */ React.createElement("button", { className: "btn danger-quiet", onClick: onForgot }, "Erase everything")))
-      : /* @__PURE__ */ React.createElement("button", { className: "lock-link", onClick: () => setWipe(true) }, "Forgot PIN?"));
+      ? /* @__PURE__ */ React.createElement("div", { className: "lock-forgot" }, /* @__PURE__ */ React.createElement("div", { className: "lock-warn" }, tr("lock_erase_q")), /* @__PURE__ */ React.createElement("div", { className: "lock-forgot-row" }, /* @__PURE__ */ React.createElement("button", { className: "btn quiet", onClick: () => setWipe(false) }, tr("btn_cancel")), /* @__PURE__ */ React.createElement("button", { className: "btn danger-quiet", onClick: onForgot }, tr("lock_erase"))))
+      : /* @__PURE__ */ React.createElement("button", { className: "lock-link", onClick: () => setWipe(true) }, tr("lock_forgot")));
 }
 function LockSetup({ settings, setSetting, data }) {
   const rec = settings.lock;
@@ -3502,42 +3648,42 @@ function Onboarding({ settings, setSetting, setTab }) {
     if (goSettings) setTab("settings");
   };
   const dots = /* @__PURE__ */ React.createElement("div", { className: "ob-dots" }, Array.from({ length: N }).map((_, i) => /* @__PURE__ */ React.createElement("span", { key: i, className: "ob-dot" + (i === step ? " on" : "") })));
-  const back = step > 0 ? /* @__PURE__ */ React.createElement("button", { className: "ob-back", onClick: () => setStep(step - 1) }, "Back") : null;
+  const back = step > 0 ? /* @__PURE__ */ React.createElement("button", { className: "ob-back", onClick: () => setStep(step - 1) }, tr("btn_back")) : null;
   let body;
   if (step === 0) {
     body = /* @__PURE__ */ React.createElement("div", { className: "ob-card" },
       /* @__PURE__ */ React.createElement("div", { className: "ob-jar" }, /* @__PURE__ */ React.createElement(PocketMark, { size: 52 })),
-      /* @__PURE__ */ React.createElement("h1", { className: "ob-h" }, "Welcome to Stash"),
-      /* @__PURE__ */ React.createElement("p", { className: "ob-p" }, "Stash answers one question — stash it, or spend it? — from what's really in your bank, not a guess."),
-      /* @__PURE__ */ React.createElement("div", { className: "ob-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: () => setStep(1) }, "Get started")));
+      /* @__PURE__ */ React.createElement("h1", { className: "ob-h" }, tr("ob_welcome_h")),
+      /* @__PURE__ */ React.createElement("p", { className: "ob-p" }, tr("ob_welcome_p")),
+      /* @__PURE__ */ React.createElement("div", { className: "ob-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: () => setStep(1) }, tr("ob_getstarted"))));
   } else if (step === 1) {
     body = /* @__PURE__ */ React.createElement("div", { className: "ob-card" },
-      /* @__PURE__ */ React.createElement("div", { className: "ob-eyebrow" }, "Your privacy"),
-      /* @__PURE__ */ React.createElement("h1", { className: "ob-h" }, "Your money stays yours"),
+      /* @__PURE__ */ React.createElement("div", { className: "ob-eyebrow" }, tr("ob_privacy_eyebrow")),
+      /* @__PURE__ */ React.createElement("h1", { className: "ob-h" }, tr("ob_privacy_h")),
       /* @__PURE__ */ React.createElement("ul", { className: "ob-ul" },
-        /* @__PURE__ */ React.createElement("li", null, "Your data lives on your device — not on our servers."),
-        /* @__PURE__ */ React.createElement("li", null, "Backups are end-to-end encrypted. We can't read them."),
-        /* @__PURE__ */ React.createElement("li", null, "Nothing is sold or shared. Export or erase it all, anytime."),
-        /* @__PURE__ */ React.createElement("li", null, "Stash is a decision tool — not licensed financial advice.")),
-      /* @__PURE__ */ React.createElement("div", { className: "ob-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: () => setStep(2) }, "I understand"), back));
+        /* @__PURE__ */ React.createElement("li", null, tr("ob_priv1")),
+        /* @__PURE__ */ React.createElement("li", null, tr("ob_priv2")),
+        /* @__PURE__ */ React.createElement("li", null, tr("ob_priv3")),
+        /* @__PURE__ */ React.createElement("li", null, tr("ob_priv4"))),
+      /* @__PURE__ */ React.createElement("div", { className: "ob-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: () => setStep(2) }, tr("ob_iunderstand")), back));
   } else if (step === 2) {
     body = /* @__PURE__ */ React.createElement("div", { className: "ob-card" },
-      /* @__PURE__ */ React.createElement("h1", { className: "ob-h" }, "Two quick basics"),
+      /* @__PURE__ */ React.createElement("h1", { className: "ob-h" }, tr("ob_basics_h")),
       /* @__PURE__ */ React.createElement("p", { className: "ob-p" }, "Both optional — change them anytime in Settings."),
       /* @__PURE__ */ React.createElement("div", { className: "ob-fields" },
         /* @__PURE__ */ React.createElement("div", { className: "ob-field" }, /* @__PURE__ */ React.createElement("label", null, "Never let my bank drop below", /* @__PURE__ */ React.createElement("span", { className: "f-sub" }, "We'll warn you before a buy crosses it.")), /* @__PURE__ */ React.createElement("input", { type: "number", inputMode: "decimal", placeholder: "$  e.g. 200", value: floor, onChange: (e) => setFloor(e.target.value) })),
         /* @__PURE__ */ React.createElement("div", { className: "ob-field" }, /* @__PURE__ */ React.createElement("label", null, "Next payday", /* @__PURE__ */ React.createElement("span", { className: "f-sub" }, "Powers “days until payday” on Home.")), /* @__PURE__ */ React.createElement("input", { type: "date", value: payDate, onChange: (e) => setPayDate(e.target.value) }), /* @__PURE__ */ React.createElement("select", { value: sched, onChange: (e) => setSched(e.target.value), style: { marginTop: 8 } }, /* @__PURE__ */ React.createElement("option", { value: "weekly" }, "Weekly"), /* @__PURE__ */ React.createElement("option", { value: "biweekly" }, "Every 2 weeks"), /* @__PURE__ */ React.createElement("option", { value: "semimonthly" }, "Twice a month"), /* @__PURE__ */ React.createElement("option", { value: "monthly" }, "Monthly")))),
-      /* @__PURE__ */ React.createElement("div", { className: "ob-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: () => setStep(3) }, "Continue"), back));
+      /* @__PURE__ */ React.createElement("div", { className: "ob-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: () => setStep(3) }, tr("btn_continue")), back));
   } else {
     body = /* @__PURE__ */ React.createElement("div", { className: "ob-card" },
       /* @__PURE__ */ React.createElement("div", { className: "ob-check" }, "✓"),
-      /* @__PURE__ */ React.createElement("h1", { className: "ob-h" }, "You're all set"),
+      /* @__PURE__ */ React.createElement("h1", { className: "ob-h" }, tr("ob_ready_h")),
       /* @__PURE__ */ React.createElement("p", { className: "ob-p" }, "When you're ready, finish these in Settings:"),
       /* @__PURE__ */ React.createElement("div", { className: "ob-note" },
         /* @__PURE__ */ React.createElement("div", null, "🔒  Turn on a PIN lock to keep balances private."),
         /* @__PURE__ */ React.createElement("div", null, "🏦  Connect Chime + Fidelity so spending tracks itself.")),
       /* @__PURE__ */ React.createElement("div", { className: "ob-actions" },
-        /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: () => finish(false) }, "Start using Stash"),
+        /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: () => finish(false) }, tr("ob_start")),
         /* @__PURE__ */ React.createElement("button", { className: "btn quiet", onClick: () => finish(true) }, "Set these up in Settings"), back));
   }
   return /* @__PURE__ */ React.createElement("div", { className: "onboard" }, dots, body);
@@ -4311,7 +4457,7 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     adjustFund,
     rev
   };
-  const TABS = simpleMode ? [["home", "Home", "home"], ["activity", "Activity", "activity"], ["trends", "Trends", "trends"], ["settings", "Settings", "settings"]] : [
+  const TABS = simpleMode ? [["home", tr("nav_home"), "home"], ["activity", tr("nav_activity"), "activity"], ["trends", tr("nav_trends"), "trends"], ["settings", tr("nav_settings"), "settings"]] : [
     ["home", "Home", "\u2302"],
     ["budget", "Budget", "\u25A6"],
     ["activity", "Activity", "\u21C5"],
@@ -4541,69 +4687,69 @@ function SimpleHome(p) {
   const copy = v && {
     bank: {
       ic: "\u2715",
-      head: "Stash it.",
+      head: tr("v_stash"),
       sub: (settings.balanceFloor || 0) > 0
         ? "That would drop you to " + money(v.bankAfter || 0) + " \u2014 under the " + money(settings.balanceFloor) + " floor you set."
         : "That's more than what's in the bank \u2014 you have " + money(v.bank || 0) + " right now."
     },
     cushion: {
       ic: "\u2715",
-      head: "Stash it.",
+      head: tr("v_stash"),
       sub: "Even your safety net can't cover this \u2014 bank + savings comes to " + money(totalCushion) + "."
     },
     net: {
       ic: "\u25b3",
-      head: "Use your safety net.",
+      head: tr("v_safetynet"),
       sub: "An emergency is what it's for \u2014 you'd have " + money(v.netAfter || 0) + " of cover left" + (v.runwayAfter != null && v.runwayAfter !== Infinity ? " (\u2248 " + v.runwayAfter.toFixed(1) + " mo)" : "") + "."
     },
     dent: {
       ic: "\u25b3",
-      head: "Your call.",
+      head: tr("v_yourcall"),
       sub: "It fits the month, but it drops your safety net below your " + settings.targetRunway + "-month goal."
     },
     squeeze: {
       ic: "\u25b3",
-      head: "Your call.",
+      head: tr("v_yourcall"),
       sub: "That leaves about " + money(v.perDayAfter || 0) + "/day for the last " + daysRemaining + " days of " + monthLabel(month) + "."
     },
     left: {
       ic: "\u2715",
-      head: "Stash it.",
+      head: tr("v_stash"),
       sub: "That's more than you have left \u2014 you'd be " + money(-v.leftAfter) + " past what came in this month."
     },
     pace: {
       ic: "\u2715",
-      head: "Stash it.",
+      head: tr("v_stash"),
       sub: "It would tip the month red \u2014 at your pace you'd end " + monthLabel(month) + " around " + money(v.projAfter) + "."
     },
     mostleft: {
       ic: "\u25B3",
-      head: "Your call.",
+      head: tr("v_yourcall"),
       sub: "It's most of what's left \u2014 only " + money(v.leftAfter) + " would remain for the rest of " + monthLabel(month) + "."
     },
     trend: {
       ic: "\u25B3",
-      head: "Your call.",
+      head: tr("v_yourcall"),
       sub: monthLabel(month) + " is already trending negative \u2014 around " + money(projectedEnd == null ? 0 : projectedEnd) + " before this."
     },
     bigday: {
       ic: "\u25B3",
-      head: "Your call.",
+      head: tr("v_yourcall"),
       sub: "That's " + (perDay ? Math.round(cents / perDay) : 0) + " days of budget in one go \u2014 about " + money(perDay || 0) + "/day is left."
     },
     want: {
       ic: "\u25b3",
-      head: "Your call.",
+      head: tr("v_yourcall"),
       sub: "That's a big bite of your cash for a want \u2014 you'd have " + money(v.bankAfter || 0) + " left in the bank."
     },
     reserved: {
       ic: "\u25b3",
-      head: "Your call.",
+      head: tr("v_yourcall"),
       sub: "This dips into the " + money(v.reservedAfter || 0) + " set aside for bills still due this month \u2014 you'd have " + money(v.bankAfter || 0) + " in the bank."
     },
     ok: {
       ic: "\u2713",
-      head: "Spend it.",
+      head: tr("v_spend"),
       sub: (leniency > 1 && cents > (perDay || 0) * 3 ? "Essentials get some slack \u2014 you'd have " + money(v.leftAfter) + " left this month." : "You'd still have " + money(v.leftAfter) + " left this month.") + (leniency <= 1 && (settings.savingsGoal || 0) > 0 && savedTotal < settings.savingsGoal ? " Or stash it \u2014 " + money(cents) + " closer to your " + fmt0(settings.savingsGoal) + " goal." : "")
     }
   }[v.reason];
@@ -4653,7 +4799,7 @@ function SimpleHome(p) {
     },
     /* @__PURE__ */ React.createElement("span", { className: "b-ic" }, b.icon),
     b.label
-  ))), cents != null && cents > 0 && !bucket && /* @__PURE__ */ React.createElement("div", { className: "hint", style: { textAlign: "center", marginTop: 8 } }, "Pick the category that fits — essentials get more slack, fun gets less."), reservedC > 0 && !v && /* @__PURE__ */ React.createElement("div", { className: "hint", style: { textAlign: "center", marginTop: 8 } }, money(reservedC), " held back for bills due later this month."), v && monthNet > 0 && cents > 0 && /* @__PURE__ */ React.createElement("div", { className: "impact" }, /* @__PURE__ */ React.createElement("div", { className: "meter " + (v.verdict === "RED" ? "crit-track" : v.verdict === "AMBER" ? "warn-track" : "") }, /* @__PURE__ */ React.createElement("i", { style: { transform: "scaleX(" + Math.max(0, Math.min(1, v.leftAfter / monthNet)).toFixed(4) + ")" } })), /* @__PURE__ */ React.createElement("div", { className: "impact-cap" }, v.leftAfter >= 0 ? money(v.leftAfter) + " left this month after this" : money(-v.leftAfter) + " over for the month")), v && (v.verdict !== "RED" || bucket === "emergency" || bucket === "bills") && /* @__PURE__ */ React.createElement("div", { className: "verdict-stage", key: "stage-" + v.verdict + "-" + v.reason }, v.verdict === "RED" ? /* @__PURE__ */ React.createElement(StashAnim, null) : v.verdict === "GREEN" ? /* @__PURE__ */ React.createElement(SwipeAnim, null) : /* @__PURE__ */ React.createElement(CoinAnim, null)), v && /* @__PURE__ */ React.createElement("div", { key: "vd-" + v.verdict, className: "verdict " + v.verdict.toLowerCase(), role: "status" }, /* @__PURE__ */ React.createElement("span", { className: "v-ic" }, copy.ic), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("b", null, copy.head), /* @__PURE__ */ React.createElement("span", { className: "v-sub" }, copy.sub))), false, !v && /* @__PURE__ */ React.createElement("div", { className: "pocket-brand" }, /* @__PURE__ */ React.createElement(PocketMark, { size: 34 }), /* @__PURE__ */ React.createElement("div", { className: "pocket-tag" }, /* @__PURE__ */ React.createElement(TypeOn, { text: "What's in your stash?" })))), false && /* @__PURE__ */ React.createElement("div", { className: "tilerow jar-center" }, /* @__PURE__ */ React.createElement("div", { className: "minitile" }, /* @__PURE__ */ React.createElement("div", { className: "mt-label" }, "Saved up"), /* @__PURE__ */ React.createElement(AnimatedFmt0, { className: "mt-val", cents: savedTotal })), /* @__PURE__ */ React.createElement(Jar, { level: savingsLevel, size: 46, tid: "saved" }), /* @__PURE__ */ React.createElement("div", { className: "minitile" }, /* @__PURE__ */ React.createElement("div", { className: "mt-label" }, "Safety net"), /* @__PURE__ */ React.createElement("div", { className: "mt-val" }, runway === Infinity ? "\u2014" : runway.toFixed(1) + "mo"))), dataMonths.length > 1 ? null : false ? /* @__PURE__ */ React.createElement("section", { className: "card center" }, /* @__PURE__ */ React.createElement("div", { className: "empty" }, /* @__PURE__ */ React.createElement("span", { className: "e-ic" }, "\u{1F4B5}"), "Tap ", /* @__PURE__ */ React.createElement("b", null, "+"), " and log your first deposit.")) : null);
+  ))), cents != null && cents > 0 && !bucket && /* @__PURE__ */ React.createElement("div", { className: "hint", style: { textAlign: "center", marginTop: 8 } }, "Pick the category that fits — essentials get more slack, fun gets less."), reservedC > 0 && !v && /* @__PURE__ */ React.createElement("div", { className: "hint", style: { textAlign: "center", marginTop: 8 } }, money(reservedC), " held back for bills due later this month."), v && monthNet > 0 && cents > 0 && /* @__PURE__ */ React.createElement("div", { className: "impact" }, /* @__PURE__ */ React.createElement("div", { className: "meter " + (v.verdict === "RED" ? "crit-track" : v.verdict === "AMBER" ? "warn-track" : "") }, /* @__PURE__ */ React.createElement("i", { style: { transform: "scaleX(" + Math.max(0, Math.min(1, v.leftAfter / monthNet)).toFixed(4) + ")" } })), /* @__PURE__ */ React.createElement("div", { className: "impact-cap" }, v.leftAfter >= 0 ? money(v.leftAfter) + " left this month after this" : money(-v.leftAfter) + " over for the month")), v && (v.verdict !== "RED" || bucket === "emergency" || bucket === "bills") && /* @__PURE__ */ React.createElement("div", { className: "verdict-stage", key: "stage-" + v.verdict + "-" + v.reason }, v.verdict === "RED" ? /* @__PURE__ */ React.createElement(StashAnim, null) : v.verdict === "GREEN" ? /* @__PURE__ */ React.createElement(SwipeAnim, null) : /* @__PURE__ */ React.createElement(CoinAnim, null)), v && /* @__PURE__ */ React.createElement("div", { key: "vd-" + v.verdict, className: "verdict " + v.verdict.toLowerCase(), role: "status" }, /* @__PURE__ */ React.createElement("span", { className: "v-ic" }, copy.ic), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("b", null, copy.head), /* @__PURE__ */ React.createElement("span", { className: "v-sub" }, copy.sub))), false, !v && /* @__PURE__ */ React.createElement("div", { className: "pocket-brand" }, /* @__PURE__ */ React.createElement(PocketMark, { size: 34 }), /* @__PURE__ */ React.createElement("div", { className: "pocket-tag" }, /* @__PURE__ */ React.createElement(TypeOn, { text: tr("ask_ghost") })))), false && /* @__PURE__ */ React.createElement("div", { className: "tilerow jar-center" }, /* @__PURE__ */ React.createElement("div", { className: "minitile" }, /* @__PURE__ */ React.createElement("div", { className: "mt-label" }, "Saved up"), /* @__PURE__ */ React.createElement(AnimatedFmt0, { className: "mt-val", cents: savedTotal })), /* @__PURE__ */ React.createElement(Jar, { level: savingsLevel, size: 46, tid: "saved" }), /* @__PURE__ */ React.createElement("div", { className: "minitile" }, /* @__PURE__ */ React.createElement("div", { className: "mt-label" }, "Safety net"), /* @__PURE__ */ React.createElement("div", { className: "mt-val" }, runway === Infinity ? "\u2014" : runway.toFixed(1) + "mo"))), dataMonths.length > 1 ? null : false ? /* @__PURE__ */ React.createElement("section", { className: "card center" }, /* @__PURE__ */ React.createElement("div", { className: "empty" }, /* @__PURE__ */ React.createElement("span", { className: "e-ic" }, "\u{1F4B5}"), "Tap ", /* @__PURE__ */ React.createElement("b", null, "+"), " and log your first deposit.")) : null);
 }
 function EnvelopeRow({ r, compact, onTap }) {
   const pct = r.planned > 0 ? r.spent / r.planned : r.spent > 0 ? 1 : 0;
@@ -5448,7 +5594,7 @@ function Settings(p) {
         }
       }
     ))
-  ), /* @__PURE__ */ React.createElement(Acc, { title: "Recurring & upcoming", cap: (settings.commitments || []).length ? (settings.commitments.length + " item" + (settings.commitments.length === 1 ? "" : "s")) : "auto" }, /* @__PURE__ */ React.createElement(CommitmentsSetup, { settings, setSetting })), /* @__PURE__ */ React.createElement(Acc, { title: "App & data", cap: syncCfg && syncCfg.enabled ? "sync on" : "sync off" }, /* @__PURE__ */ React.createElement(
+  ), /* @__PURE__ */ React.createElement(Acc, { title: "Recurring & upcoming", cap: (settings.commitments || []).length ? (settings.commitments.length + " item" + (settings.commitments.length === 1 ? "" : "s")) : "auto" }, /* @__PURE__ */ React.createElement(CommitmentsSetup, { settings, setSetting })), /* @__PURE__ */ React.createElement(Acc, { title: "App & data", cap: syncCfg && syncCfg.enabled ? "sync on" : "sync off" }, /* @__PURE__ */ React.createElement("div", { className: "lock-row", style: { marginTop: 0, marginBottom: 10 } }, /* @__PURE__ */ React.createElement("span", null, tr("set_language")), /* @__PURE__ */ React.createElement("select", { value: settings.lang || "system", onChange: (e) => setSetting("lang", e.target.value), "aria-label": tr("set_language") }, /* @__PURE__ */ React.createElement("option", { value: "system" }, tr("set_language_system")), Object.keys(LANG_NAMES).map((code) => /* @__PURE__ */ React.createElement("option", { key: code, value: code }, LANG_NAMES[code])))), /* @__PURE__ */ React.createElement(
     Acc,
     {
       title: "Sync across devices",
