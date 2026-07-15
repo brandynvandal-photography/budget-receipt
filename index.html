@@ -5029,7 +5029,7 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
       setView: setActView,
       openAdd: () => setSheetOpen(true)
     }
-  ), effTab === "trends" && /* @__PURE__ */ React.createElement(Trends, { ...shared, sfHist: data.sfHist || {} }), effTab === "funds" && /* @__PURE__ */ React.createElement(Funds, { ...shared }), effTab === "settings" && /* @__PURE__ */ React.createElement(Settings, { ...shared, simpleMode, data, ...{ setSetting, exportJSON, importJSON, resetSeed, syncCfg, setSyncCfg, syncInfo, runSync }, sfMap: data.sfMap || {}, setSfRole: (acct, role) => setData((d) => ({ ...d, sfMap: { ...d.sfMap || {}, [acct]: role } })) })), (effTab === "home" || effTab === "budget" || effTab === "activity") && /* @__PURE__ */ React.createElement(Fab, { openSheet: (k) => { setSheetKind(k); setSheetOpen(true); } }), sheetOpen &&/* @__PURE__ */ React.createElement(
+  ), effTab === "trends" && /* @__PURE__ */ React.createElement(Trends, { ...shared, sfHist: data.sfHist || {} }), effTab === "funds" && /* @__PURE__ */ React.createElement(Funds, { ...shared }), effTab === "settings" && /* @__PURE__ */ React.createElement(Settings, { ...shared, simpleMode, data, ...{ setSetting, exportJSON, importJSON, resetSeed, syncCfg, setSyncCfg, syncInfo, runSync }, sfMap: data.sfMap || {}, setSfRole: (acct, role) => setData((d) => ({ ...d, sfMap: { ...d.sfMap || {}, [acct]: role } })), disconnectBank })), (effTab === "home" || effTab === "budget" || effTab === "activity") && /* @__PURE__ */ React.createElement(Fab, { openSheet: (k) => { setSheetKind(k); setSheetOpen(true); } }), sheetOpen &&/* @__PURE__ */ React.createElement(
     AddSheet,
     {
       ...{ month, addTxn, addIncome, addBatch, categories, merchantMap },
@@ -5924,7 +5924,8 @@ function Settings(p) {
     syncInfo,
     runSync,
     sfMap,
-    setSfRole
+    setSfRole,
+    disconnectBank
   } = p;
   const [check, setCheck] = useState(null);
   const [importErr, setImportErr] = useState(false);
