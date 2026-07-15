@@ -4244,26 +4244,13 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     const id = "recinc-" + CURRENT_MONTH;
     const amt = settings.monthlyIncome || 0;
     if (bankTruth) {
-      // bank-truth: the bank feed is the source of truth. For any PAST month the
-      // bank actually reported deposits, the plan's materialized deposit stands
-      // down — otherwise that month double-counts plan + real (the plan entries
-      // were materialized month-by-month before the bank was ever connected, so
-      // once the feed backfills real paychecks the two collide). Months the bank
-      // never covered keep their plan entry as the only record. The current month
-      // shows real deposits only (no plan gap-fill).
-      const realByMonth = {};
-      incomeRaw.forEach((e) => { if (!String(e.id).startsWith("recinc-")) { const m = C.monthOf(e.date); realByMonth[m] = (realByMonth[m] || 0) + e.amount; } });
-      const base = incomeRaw.filter((e) => {
-        if (!String(e.id).startsWith("recinc-")) return true;   // real deposits always kept
-        const m = C.monthOf(e.date);
-        if (m === CURRENT_MONTH) return false;                  // current month handled below
-        return !(realByMonth[m] > 0);                           // drop plan for months the bank covered
-      });
-      // Bank-truth: IN = real bank deposits only. The monthly plan is a target,
-      // surfaced separately as the "Monthly plan income /mo" line — it is never
-      // injected as a fake "Monthly income (plan)" deposit (that read as a stale,
-      // undeletable manual entry that kept coming back).
-      return base;
+      // Bank-truth: once a bank is connected, income is REAL bank deposits only,
+      // in EVERY month. Plan entries (recinc-*, materialized month-by-month before
+      // the bank was connected) are never counted as income — they inflated the
+      // month-by-month history and showed up as a stale, undeletable "Monthly
+      // income (plan)" line. The plan target is surfaced separately as the
+      // "Monthly plan income /mo" header, not as a deposit.
+      return incomeRaw.filter((e) => !String(e.id).startsWith("recinc-"));
     }
     if (amt <= 0) return incomeRaw;
     const deadTs = ((data.deleted || {}).income || []).reduce((mx, x) => {
