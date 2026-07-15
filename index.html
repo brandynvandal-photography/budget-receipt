@@ -3875,6 +3875,11 @@ function BankConnect({ settings, setSetting }) {
   const redirect = !!(P && P.mode === "redirect"); // SimpleFIN: opens the bank login, then paste a token
   const plaidLink = !!(P && P.mode === "plaid-link"); // Plaid: opens Plaid Link SDK
   const links = settings.bankLinks || [];
+  // Show only the connections that belong to the selected source — Plaid banks
+  // under Plaid, SimpleFIN banks under SimpleFIN, demo under Demo.
+  const activeProvider = (P && P.provider) || "mock";
+  const srcLabel = activeProvider === "plaid" ? "Plaid" : activeProvider === "simplefin" ? "SimpleFIN" : "Demo";
+  const shownLinks = links.filter((l) => (l.provider || "mock") === activeProvider);
   const [phase, setPhase] = useState("idle"); // idle | picking | token | working | error
   const [session, setSession] = useState(null);
   const [insts, setInsts] = useState([]);
@@ -3967,7 +3972,7 @@ function BankConnect({ settings, setSetting }) {
     if (P && P.disconnect) { P.disconnect(l.connectionId).catch(() => {}); }
     setSetting("bankLinks", (settings.bankLinks || []).filter((x) => x.connectionId !== l.connectionId));
   };
-  const rows = links.map((l) => /* @__PURE__ */ React.createElement("div", { key: l.id || l.connectionId, className: "bank-row" + (justAdded === (l.id || l.connectionId) ? " just-added" : "") },
+  const rows = shownLinks.map((l) => /* @__PURE__ */ React.createElement("div", { key: l.id || l.connectionId, className: "bank-row" + (justAdded === (l.id || l.connectionId) ? " just-added" : "") },
     avatar(l.institution, 34),
     /* @__PURE__ */ React.createElement("div", { className: "bank-main" },
       /* @__PURE__ */ React.createElement("div", { className: "bank-name" }, (l.institution && l.institution.name) || "Bank",
@@ -3991,10 +3996,13 @@ function BankConnect({ settings, setSetting }) {
     /* @__PURE__ */ React.createElement("button", { className: "btn primary", disabled: !setupToken.trim(), onClick: finishRedirect }, "Finish connecting"),
     /* @__PURE__ */ React.createElement("button", { className: "btn quiet", onClick: () => { setPhase("idle"); setSession(null); setSetupToken(""); } }, tr("btn_cancel")));
   const cta = phase !== "picking" && phase !== "token" && /* @__PURE__ */ React.createElement("button", {
-    className: "btn " + (links.length ? "quiet" : "primary"), disabled: phase === "working", onClick: start
-  }, phase === "working" ? tr("ob_bank_working") : links.length ? tr("ob_bank_add") : tr("ob_bank_cta"));
+    className: "btn " + (shownLinks.length ? "quiet" : "primary"), disabled: phase === "working", onClick: start
+  }, phase === "working" ? tr("ob_bank_working") : shownLinks.length ? tr("ob_bank_add") : tr("ob_bank_cta"));
+  // clarify when banks exist but not via the selected source
+  const emptyForSource = phase === "idle" && shownLinks.length === 0 && links.some((l) => (l.provider || "mock") !== activeProvider);
   return /* @__PURE__ */ React.createElement("div", { className: "bank-connect" },
     rows.length > 0 && /* @__PURE__ */ React.createElement("div", { className: "bank-list" }, rows),
+    emptyForSource && /* @__PURE__ */ React.createElement("div", { className: "bank-preview-note" }, "No banks connected through " + srcLabel + " yet."),
     err && /* @__PURE__ */ React.createElement("div", { className: "bank-err" }, err),
     picker, tokenPanel, cta,
     demo && phase !== "picking" && /* @__PURE__ */ React.createElement("div", { className: "bank-preview-note" }, "Preview — connections here are simulated until bank linking goes live."));
