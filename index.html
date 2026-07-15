@@ -4291,6 +4291,33 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     });
     if (changed) setSetting("relayKeys", next);
   }, [settings.relayKeys, settings.bankLinks]);
+  // Restore connections from the relay: the server (KV) is the source of truth
+  // for which banks are linked, so if a connection isn't in our local card list
+  // — lost to a reinstall, a cleared device, or a UI hiccup — add it back. Runs
+  // once keys are available. A properly disconnected bank is deleted server-side
+  // (relay disconnect), so it won't come back.
+  useEffect(() => {
+    const P = window.BankProviderRelay;
+    if (!P || !localStorage.getItem("stash.relay.userSecret")) return;
+    let live = true;
+    P.listAccounts().then((conns) => {
+      if (!live || !conns || !conns.length) return;
+      const have = {};
+      (settings.bankLinks || []).forEach((l) => { have[l.connectionId] = 1; });
+      const add = [];
+      conns.forEach((c) => {
+        if (have[c.connectionId]) return;
+        const groups = (c.institutions && c.institutions.length) ? c.institutions : [];
+        groups.forEach((g, i) => add.push({
+          id: c.connectionId + (groups.length > 1 ? "::" + i : ""), connectionId: c.connectionId,
+          provider: c.provider || "simplefin", readOnly: c.readOnly !== false,
+          institution: g.institution, accounts: g.accounts || [], connectedAt: Date.now(),
+        }));
+      });
+      if (add.length) setSetting("bankLinks", [...(settings.bankLinks || []), ...add]);
+    }).catch(() => {});
+    return () => { live = false; };
+  }, [settings.relayKeys]);
   // Relay (SimpleFIN) on-demand sync: when the app is open and there are live
   // relay connections, pull transactions + balances and feed them into the SAME
   // inbox state the GitHub SimpleFIN Action uses — so role auto-assignment,
