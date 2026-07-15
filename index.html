@@ -4858,7 +4858,13 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     return anchor.cents + inflow - outflow;
   }, [anchor, income, txns]);
   const totalCushion = (availableNow != null ? availableNow : settings.liquidCushion) + savedTotal;
-  const runway = C.safetyNetMonths(totalCushion, burn, avgIncome, settings.targetRunway);
+  // "Safety net — if income stopped": how many months your cushion (bank +
+  // savings) would cover real spending. Honest cushion ÷ average monthly spend
+  // — nothing else. (The old safetyNetMonths shrank this by your current income
+  // and your savings goal, which contradicts the label: income is irrelevant
+  // once it stops, and a goal shouldn't change how much runway you actually
+  // have. The verdict engine keeps its own goal-aware logic separately.)
+  const runway = burn > 0 ? totalCushion / burn : (totalCushion > 0 ? Infinity : 0);
   const suggestions = useMemo(() => {
     const months3 = C.trailingMonths(statsMonths, asOf, 3);
     const weights = {};
