@@ -4419,7 +4419,14 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     (inbox || []).forEach((r) => { if (r && r.account) names[r.account] = 1; });
     const adds = {};
     Object.keys(names).forEach((a) => {
-      if (!known[a]) adds[a] = /credit|builder/i.test(a) ? "credit" : /saving|fidelity|invest|401|ira|broker|vanguard/i.test(a) ? "save" : "bank";
+      // Only spendable cash/checking counts as "In the bank". Loans/mortgages
+      // are liabilities (ignore); credit cards are their own bucket; savings,
+      // money-market, CD, and investment/retirement accounts pool into Savings.
+      if (!known[a]) adds[a] =
+        /\b(loan|mortgage|student|heloc|auto\s*loan)\b/i.test(a) ? "ignore"
+        : /credit|builder/i.test(a) ? "credit"
+        : /saving|money\s*market|money\s*mkt|\bmmkt\b|\bcd\b|fidelity|invest|brokerage|\b401k?\b|\bira\b|roth|\bhsa\b|retire|vanguard/i.test(a) ? "save"
+        : "bank";
     });
     if (Object.keys(adds).length) {
       setData((d) => ({ ...d, sfMap: { ...d.sfMap || {}, ...adds } }));
