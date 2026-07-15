@@ -687,6 +687,15 @@ button:focus-visible,a:focus-visible,select:focus-visible,input:focus-visible,la
 .bt-btns .btn{padding:8px 14px}
 .bt-sub{font-size:12px;color:var(--muted);margin-top:8px}
 .actmonth{max-width:132px}
+.jarchart{display:flex;align-items:flex-end;justify-content:space-around;gap:2px;padding:8px 2px 2px}
+.jarcol{background:none;border:none;display:flex;flex-direction:column;align-items:center;gap:5px;cursor:pointer;padding:5px 2px 3px;border-radius:12px;flex:1;min-width:0}
+.jarcol-val{font-size:11px;font-weight:700;color:var(--ink);height:14px;line-height:14px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.jarcol-label{font-size:11px;color:var(--muted)}
+.jarcol svg{transition:transform .16s ease}
+.jarcol.on{background:rgba(255,255,255,.05)}
+.jarcol.on .jarcol-label{color:var(--ink);font-weight:700}
+.jarcol.on svg{transform:scale(1.14)}
+.jarcol.neg.on{background:rgba(255,143,143,.1)}
 /* iOS "liquid glass": translucent, backdrop-blurred surfaces with a light top edge */
 @supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
   .tabbar{background:color-mix(in srgb, var(--surface) 66%, transparent);-webkit-backdrop-filter:blur(26px) saturate(1.6);backdrop-filter:blur(26px) saturate(1.6);border-top:1px solid rgba(255,255,255,.08);box-shadow:inset 0 1px 0 rgba(255,255,255,.07)}
@@ -4856,77 +4865,17 @@ function NetChart({ income, txns, dataMonths, month, setMonth }) {
   const months = dataMonths.slice(-8);
   const nets = months.map((m) => ({ m, net: C.netForMonth(income, txns, m) }));
   const maxAbs = Math.max(1, ...nets.map((d) => Math.abs(d.net)));
-  const W = 320, H = 132, padT = 18, padB = 22;
-  const plotH = H - padT - padB, zero = padT + plotH / 2;
-  const half = plotH / 2;
-  const bw = Math.min(34, Math.floor(W / months.length) - 10);
-  const step = W / months.length;
-  const r = 8;
-  function barPath(x, net) {
-    const h = Math.max(2, Math.abs(net) / maxAbs * (half - 2));
-    if (net >= 0) {
-      const y = zero - h;
-      return `M${x},${zero} L${x},${y + r} Q${x},${y} ${x + r},${y} L${x + bw - r},${y} Q${x + bw},${y} ${x + bw},${y + r} L${x + bw},${zero} Z`;
-    }
-    const y2 = zero + h;
-    return `M${x},${zero} L${x + bw},${zero} L${x + bw},${y2 - r} Q${x + bw},${y2} ${x + bw - r},${y2} L${x + r},${y2} Q${x},${y2} ${x},${y2 - r} Z`;
-  }
-  const last = nets[nets.length - 1];
-  // scrub: drag a finger (or mouse) across the chart to select months live;
-  // touch-action pan-y keeps vertical page scrolling native
-  const scrub = (e) => {
-    const r = e.currentTarget.getBoundingClientRect();
-    const i = Math.max(0, Math.min(months.length - 1, Math.floor((e.clientX - r.left) / r.width * months.length)));
-    if (months[i] && months[i] !== month) setMonth(months[i]);
-  };
-  return /* @__PURE__ */ React.createElement("div", { className: "chart-wrap" }, /* @__PURE__ */ React.createElement(
-    "svg",
-    {
-      viewBox: `0 0 ${W} ${H}`,
-      width: "100%",
-      style: { touchAction: "pan-y" },
-      onPointerDown: (e) => { try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) {} scrub(e); },
-      onPointerMove: (e) => { if (e.buttons) scrub(e); },
-      role: "img",
-      "aria-label": "Monthly net: " + nets.map((d) => monthShort(d.m) + " " + fmt0(d.net)).join(", ")
-    },
-    /* @__PURE__ */ React.createElement("line", { x1: "0", x2: W, y1: zero, y2: zero, stroke: "var(--baseline)", strokeWidth: "1" }),
-    nets.map((d, i) => {
-      const x = i * step + (step - bw) / 2;
+  // one jar per month: fuller = ended further ahead; a low red jar = behind.
+  return /* @__PURE__ */ React.createElement("div", { className: "jarchart", role: "img", "aria-label": "Monthly net: " + nets.map((d) => monthShort(d.m) + " " + fmt0(d.net)).join(", ") },
+    nets.map((d) => {
       const sel = d.m === month;
-      return /* @__PURE__ */ React.createElement("g", { key: d.m, onClick: () => setMonth(d.m), style: { cursor: "pointer" } }, /* @__PURE__ */ React.createElement("rect", { x: i * step, y: "0", width: step, height: H, fill: "transparent" }, /* @__PURE__ */ React.createElement("title", null, monthLabel(d.m), ": ", money(d.net))), /* @__PURE__ */ React.createElement(
-        "path",
-        {
-          d: barPath(x, d.net),
-          className: "nc-bar",
-          style: { transformBox: "fill-box", transformOrigin: d.net >= 0 ? "50% 100%" : "50% 0%", animationDelay: i * 45 + "ms" },
-          fill: sel ? d.net >= 0 ? "#45e0a6" : "#ff8f8f" : d.net >= 0 ? "rgba(255,255,255,.14)" : "rgba(255,143,143,.28)"
-        }
-      ), /* @__PURE__ */ React.createElement(
-        "text",
-        {
-          x: i * step + step / 2,
-          y: H - 6,
-          textAnchor: "middle",
-          fontSize: "11",
-          fill: sel ? "#ffffff" : "var(--muted)",
-          fontWeight: sel ? 700 : 400
-        },
-        monthShort(d.m)
-      ), sel && /* @__PURE__ */ React.createElement(
-        "text",
-        {
-          x: i * step + step / 2,
-          y: d.net >= 0 ? zero - Math.abs(d.net) / maxAbs * (half - 2) - 5 : zero + Math.abs(d.net) / maxAbs * (half - 2) + 12,
-          textAnchor: "middle",
-          fontSize: "11",
-          fontWeight: "700",
-          fill: "#ffffff"
-        },
-        fmt0(d.net)
-      ));
-    })
-  ));
+      const neg = d.net < 0;
+      const level = neg ? 0.12 : Math.max(0.06, Math.min(1, d.net / maxAbs));
+      return /* @__PURE__ */ React.createElement("button", { key: d.m, type: "button", className: "jarcol" + (sel ? " on" : "") + (neg ? " neg" : ""), onClick: () => setMonth(d.m), title: monthLabel(d.m) + ": " + money(d.net), "aria-label": monthLabel(d.m) + " " + money(d.net) },
+        /* @__PURE__ */ React.createElement("span", { className: "jarcol-val" }, sel ? fmt0(d.net) : ""),
+        /* @__PURE__ */ React.createElement(Jar, { level, size: 30, tint: neg ? "#ff8f8f" : sel ? "#45e0a6" : "rgba(69,224,166,.55)", tid: "nc-" + d.m }),
+        /* @__PURE__ */ React.createElement("span", { className: "jarcol-label" }, monthShort(d.m)));
+    }));
 }
 function Trends(p) {
   const { income, txns, dataMonths, month, setMonth, catById, sfHist } = p;
@@ -5118,7 +5067,7 @@ function Activity(p) {
   const saveList = txns.filter((t) => (showAll || C.monthOf(t.date) === month) && savingIds[t.categoryId] && matchTx(t)).slice().sort(sortFn);
   const incomeList = income.filter((e) => (showAll || C.monthOf(e.date) === month) && matchIn(e)).slice().sort(sortFn);
   const uncatFirst = spendList;
-  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h2", { className: "screen-title" }, "Activity"), billPrompt && /* @__PURE__ */ React.createElement("div", { className: "bill-toast" }, /* @__PURE__ */ React.createElement("div", { className: "bt-msg" }, "Set “", billPrompt.merchant, "” as a recurring bill?"), /* @__PURE__ */ React.createElement("div", { className: "bt-row" }, /* @__PURE__ */ React.createElement("label", { className: "bt-day" }, "Comes out day ", /* @__PURE__ */ React.createElement("input", { type: "number", min: 1, max: 31, value: billPrompt.day, onChange: (e) => setBillPrompt({ ...billPrompt, day: Math.max(1, Math.min(31, +e.target.value || 1)) }) })), /* @__PURE__ */ React.createElement("div", { className: "bt-btns" }, /* @__PURE__ */ React.createElement("button", { className: "btn quiet", onClick: () => setBillPrompt(null) }, "Not now"), /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: addRecurringBill }, "Add"))), /* @__PURE__ */ React.createElement("div", { className: "bt-sub" }, money(billPrompt.amount), " · reserved before you spend, until it's paid each month")), /* @__PURE__ */ React.createElement(Swiper, { labels: ["In the bank", "Saved up", "Safety net"] }, /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "In the bank"), p.availableNow != null ? /* @__PURE__ */ React.createElement(AnimatedMoneySplit, { cents: p.availableNow, className: "bank-val" + (p.availableNow < 0 ? " overspent" : "") }) : /* @__PURE__ */ React.createElement("div", { className: "bank-val", style: { opacity: 0.5 } }, "\u2014"), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, (p.settings.paycheck || {}).amount > 0 ? money(p.settings.paycheck.amount) + " per paycheck \u00b7 " + fmt0(monthSpendC) + " out \u00b7 " + monthLabel(month) : fmt0(monthIncomeC) + " in \u00b7 " + fmt0(monthSpendC) + " out \u00b7 " + monthLabel(month))), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "Saved up"), /* @__PURE__ */ React.createElement(AnimatedFmt0, { className: "bank-val", cents: p.savedTotal }), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, "Chime Savings + Fidelity")), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "Safety net"), /* @__PURE__ */ React.createElement("div", { className: "bank-val" }, p.runway === Infinity ? "\u2014" : p.runway.toFixed(1) + " mo"), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, "if income stopped"))), /* @__PURE__ */ React.createElement("div", { className: "seg" }, /* @__PURE__ */ React.createElement("button", { className: view === "spend" ? "on" : "", onClick: () => setView("spend") }, "Spending"), /* @__PURE__ */ React.createElement("button", { className: view === "income" ? "on" : "", onClick: () => setView("income") }, "Income"), /* @__PURE__ */ React.createElement("button", { className: view === "save" ? "on" : "", onClick: () => setView("save") }, "Savings")), /* @__PURE__ */ React.createElement("div", { className: "actbar" }, /* @__PURE__ */ React.createElement("select", { className: "actsort actmonth", value: showAll ? "all" : month, onChange: (e) => { const v = e.target.value; if (v === "all") setShowAll(true); else { setShowAll(false); setMonth(v); } }, "aria-label": "Filter by month" }, /* @__PURE__ */ React.createElement("option", { value: "all" }, "All months"), monthOptions.map((m) => /* @__PURE__ */ React.createElement("option", { key: m, value: m }, monthLabel(m)))), /* @__PURE__ */ React.createElement("input", { className: "actsearch", type: "search", inputMode: "search", placeholder: "\u{1F50D} Search", value: q, onChange: (e) => setQ(e.target.value) }), /* @__PURE__ */ React.createElement("select", { className: "actsort", value: sortBy, onChange: (e) => setSortBy(e.target.value), "aria-label": "Sort" }, /* @__PURE__ */ React.createElement("option", { value: "date" }, "Newest"), /* @__PURE__ */ React.createElement("option", { value: "amount" }, "Amount \u2193"))), view === "spend" && (() => {
+  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h2", { className: "screen-title" }, "Activity"), billPrompt && /* @__PURE__ */ React.createElement("div", { className: "bill-toast" }, /* @__PURE__ */ React.createElement("div", { className: "bt-msg" }, "Is “", billPrompt.merchant, "” a recurring bill?"), /* @__PURE__ */ React.createElement("div", { className: "bt-row" }, /* @__PURE__ */ React.createElement("label", { className: "bt-day" }, "Comes out day ", /* @__PURE__ */ React.createElement("input", { type: "number", min: 1, max: 31, value: billPrompt.day, onChange: (e) => setBillPrompt({ ...billPrompt, day: Math.max(1, Math.min(31, +e.target.value || 1)) }) })), /* @__PURE__ */ React.createElement("div", { className: "bt-btns" }, /* @__PURE__ */ React.createElement("button", { className: "btn quiet", onClick: () => setBillPrompt(null) }, "One-time"), /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: addRecurringBill }, "Every month"))), /* @__PURE__ */ React.createElement("div", { className: "bt-sub" }, money(billPrompt.amount), " · held back every month until you remove it in Settings → Recurring & upcoming")), /* @__PURE__ */ React.createElement(Swiper, { labels: ["In the bank", "Saved up", "Safety net"] }, /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "In the bank"), p.availableNow != null ? /* @__PURE__ */ React.createElement(AnimatedMoneySplit, { cents: p.availableNow, className: "bank-val" + (p.availableNow < 0 ? " overspent" : "") }) : /* @__PURE__ */ React.createElement("div", { className: "bank-val", style: { opacity: 0.5 } }, "\u2014"), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, (p.settings.paycheck || {}).amount > 0 ? money(p.settings.paycheck.amount) + " per paycheck \u00b7 " + fmt0(monthSpendC) + " out \u00b7 " + monthLabel(month) : fmt0(monthIncomeC) + " in \u00b7 " + fmt0(monthSpendC) + " out \u00b7 " + monthLabel(month))), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "Saved up"), /* @__PURE__ */ React.createElement(AnimatedFmt0, { className: "bank-val", cents: p.savedTotal }), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, "Chime Savings + Fidelity")), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "Safety net"), /* @__PURE__ */ React.createElement("div", { className: "bank-val" }, p.runway === Infinity ? "\u2014" : p.runway.toFixed(1) + " mo"), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, "if income stopped"))), /* @__PURE__ */ React.createElement("div", { className: "seg" }, /* @__PURE__ */ React.createElement("button", { className: view === "spend" ? "on" : "", onClick: () => setView("spend") }, "Spending"), /* @__PURE__ */ React.createElement("button", { className: view === "income" ? "on" : "", onClick: () => setView("income") }, "Income"), /* @__PURE__ */ React.createElement("button", { className: view === "save" ? "on" : "", onClick: () => setView("save") }, "Savings")), /* @__PURE__ */ React.createElement("div", { className: "actbar" }, /* @__PURE__ */ React.createElement("select", { className: "actsort actmonth", value: showAll ? "all" : month, onChange: (e) => { const v = e.target.value; if (v === "all") setShowAll(true); else { setShowAll(false); setMonth(v); } }, "aria-label": "Filter by month" }, /* @__PURE__ */ React.createElement("option", { value: "all" }, "All months"), monthOptions.map((m) => /* @__PURE__ */ React.createElement("option", { key: m, value: m }, monthLabel(m)))), /* @__PURE__ */ React.createElement("input", { className: "actsearch", type: "search", inputMode: "search", placeholder: "\u{1F50D} Search", value: q, onChange: (e) => setQ(e.target.value) }), /* @__PURE__ */ React.createElement("select", { className: "actsort", value: sortBy, onChange: (e) => setSortBy(e.target.value), "aria-label": "Sort" }, /* @__PURE__ */ React.createElement("option", { value: "date" }, "Newest"), /* @__PURE__ */ React.createElement("option", { value: "amount" }, "Amount \u2193"))), view === "spend" && (() => {
     const isBill = (t) => String(t.id || "").startsWith("recbill");
     const billRows = uncatFirst.filter(isBill);
     const manualRows = uncatFirst.filter((t) => !isBill(t));
