@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Privacy Policy — Stash.</title>
+<style>
+  :root{ --ink:#0b0b0b; --muted:#57564f; --bg:#f9f9f7; --card:#fff; --line:#e3e2db; --accent:#1c7a53; }
+  @media (prefers-color-scheme: dark){ :root{ --ink:#f2f2ef; --muted:#a9a89f; --bg:#0d0d0d; --card:#161615; --line:#2a2a27; --accent:#45e0a6; } }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif}
+  main{max-width:720px;margin:0 auto;padding:40px 20px 80px}
+  .brand{font-weight:800;font-size:20px;letter-spacing:-.01em}
+  .brand span{color:var(--accent)}
+  h1{font-size:28px;letter-spacing:-.02em;margin:24px 0 4px}
+  .updated{color:var(--muted);font-size:14px;margin:0 0 28px}
+  h2{font-size:18px;margin:32px 0 8px}
+  p,li{color:var(--ink)}
+  a{color:var(--accent)}
+  ul{padding-left:20px}
+  .lead{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px}
+  strong{font-weight:650}
+  footer{color:var(--muted);font-size:13px;margin-top:40px;border-top:1px solid var(--line);padding-top:16px}
+</style>
+</head>
+<body>
+<main>
+  <div class="brand">stash<span>.</span></div>
+  <h1>Privacy Policy</h1>
+  <p class="updated">Last updated: July 15, 2026</p>
+
+  <p class="lead">Stash ("Stash," "we," "us") is a personal budgeting app. Our core principle: <strong>your financial data stays on your device, and we're built so we can't see it.</strong></p>
+
+  <h2>What we collect</h2>
+  <p><strong>By default, nothing leaves your device.</strong> Your balances, transactions, budgets, and settings are stored locally on your device. We operate no server that receives this data in the default configuration.</p>
+  <ul>
+    <li><strong>Optional encrypted backup/sync.</strong> If you turn on backup, your data is <strong>end-to-end encrypted on your device</strong> before it is stored in a location you control. We cannot read it; we do not hold the key.</li>
+    <li><strong>Optional read-only bank connection.</strong> If you connect a bank, a minimal relay service obtains a <strong>read-only</strong> access token to fetch balances and transactions. It <strong>cannot move, send, or withdraw money</strong>. Balances and transactions are delivered to your device and stored encrypted there; the relay does <strong>not retain your financial data</strong> beyond the moment needed to complete a fetch.</li>
+    <li><strong>No analytics, no advertising, no third-party trackers</strong>, and no SDKs that profile you. We do not sell or share your personal information.</li>
+  </ul>
+
+  <h2>Service providers (subprocessors)</h2>
+  <p>To provide the optional bank connection and backup, we rely on:</p>
+  <ul>
+    <li><strong>Plaid</strong> and <strong>SimpleFIN</strong> — read-only bank data aggregators. You authenticate directly with your bank through their secure flow; <strong>Stash never sees your bank login credentials.</strong></li>
+    <li><strong>Cloudflare</strong> — hosts the stateless relay. The relay stores only a read-only access token, <strong>encrypted at rest</strong> (AES-GCM), and never stores your transactions or balances.</li>
+  </ul>
+
+  <h2>How we use data</h2>
+  <p>Only to make the app work for you — computing your available balance, holding back upcoming commitments, and answering "stash or spend?". We do not use your data to build advertising or marketing profiles.</p>
+
+  <h2>Your rights (CCPA/CPRA and other U.S. state privacy laws)</h2>
+  <ul>
+    <li><strong>Access / export</strong> — export all your data from Settings at any time.</li>
+    <li><strong>Delete</strong> — erase all data from within the app; this is immediate. Disconnecting a bank revokes the read-only token and removes its stored record.</li>
+    <li><strong>No sale or sharing</strong> — we do not sell or share personal information, so there is nothing to opt out of; you may contact us to confirm.</li>
+    <li>We honor these rights for all users regardless of state of residence.</li>
+  </ul>
+
+  <h2>Security</h2>
+  <p>Encryption in transit (TLS 1.2+) and at rest (AES-GCM). The relay stores each user's read-only bank token under a double-encryption envelope and never persists financial data. Optional app lock (PIN) protects on-device data. We follow financial-data security best practices (GLBA Safeguards-aligned), including least-privilege access, data minimization, and an incident-response process.</p>
+
+  <h2>Data retention</h2>
+  <p>Financial transactions and balances are <strong>not retained on our servers</strong>. The relay retains only an encrypted read-only access token for as long as your bank connection is active; disconnecting deletes it. On-device data is retained until you delete it.</p>
+
+  <h2>Children</h2>
+  <p>Stash is not directed to children under 13 and does not knowingly collect their data.</p>
+
+  <h2>Not financial advice</h2>
+  <p>Stash is a decision tool, not licensed financial advice.</p>
+
+  <h2>Changes &amp; contact</h2>
+  <p>We will post changes here with a new "last updated" date. Questions: <a href="mailto:bvandal@brandynvandal.com">bvandal@brandynvandal.com</a>.</p>
+
+  <footer>© 2026 Stash. · <a href="terms.html">Terms of Use</a></footer>
+</main>
+</body>
+</html>
