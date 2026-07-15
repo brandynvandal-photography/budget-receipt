@@ -4249,8 +4249,8 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
       // down — otherwise that month double-counts plan + real (the plan entries
       // were materialized month-by-month before the bank was ever connected, so
       // once the feed backfills real paychecks the two collide). Months the bank
-      // never covered keep their plan entry as the only record. The CURRENT month
-      // gap-fills: IN shows the full plan now and shrinks 1:1 as paychecks land.
+      // never covered keep their plan entry as the only record. The current month
+      // shows real deposits only (no plan gap-fill).
       const realByMonth = {};
       incomeRaw.forEach((e) => { if (!String(e.id).startsWith("recinc-")) { const m = C.monthOf(e.date); realByMonth[m] = (realByMonth[m] || 0) + e.amount; } });
       const base = incomeRaw.filter((e) => {
@@ -4259,11 +4259,11 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
         if (m === CURRENT_MONTH) return false;                  // current month handled below
         return !(realByMonth[m] > 0);                           // drop plan for months the bank covered
       });
-      if (amt <= 0) return base;
-      const real = realByMonth[CURRENT_MONTH] || 0;
-      const gap = Math.max(0, amt - real);
-      if (!gap) return base;
-      return [...base, { id, date: CURRENT_MONTH + "-01", amount: gap, source: "Monthly income (plan)" }];
+      // Bank-truth: IN = real bank deposits only. The monthly plan is a target,
+      // surfaced separately as the "Monthly plan income /mo" line — it is never
+      // injected as a fake "Monthly income (plan)" deposit (that read as a stale,
+      // undeletable manual entry that kept coming back).
+      return base;
     }
     if (amt <= 0) return incomeRaw;
     const deadTs = ((data.deleted || {}).income || []).reduce((mx, x) => {
@@ -5684,20 +5684,15 @@ function Budget(p) {
   }));
 }
 function DeleteX({ onDelete }) {
-  const [armed, setArmed] = useState(false);
-  const timer = useRef(null);
-  useEffect(() => () => clearTimeout(timer.current), []);
-  if (!armed) {
-    return /* @__PURE__ */ React.createElement("button", { className: "delx", "aria-label": "Delete", onClick: () => {
-      buzz(10);
-      setArmed(true);
-      timer.current = setTimeout(() => setArmed(false), 2500);
-    } }, "\xD7");
-  }
-  return /* @__PURE__ */ React.createElement("button", { className: "delx armed", onClick: () => {
-    clearTimeout(timer.current);
+  // Single tap deletes immediately — the undo toast is the safety net, so the
+  // old two-tap "arm then confirm" (which made a single tap look like nothing
+  // happened) is gone.
+  return /* @__PURE__ */ React.createElement("button", { className: "delx", "aria-label": "Delete", onClick: (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    buzz(10);
     onDelete();
-  } }, "Delete?");
+  } }, "\xD7");
 }
 function Activity(p) {
   const {
