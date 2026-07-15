@@ -4,14 +4,14 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
-<meta name="apple-mobile-web-app-title" content="Stash" />
+<meta name="apple-mobile-web-app-title" content="In My Stash" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="theme-color" content="#16413a" />
 <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png" />
 <link rel="icon" type="image/png" href="apple-touch-icon.png" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="robots" content="noindex" />
-<title>Stash</title>
+<title>In My Stash</title>
 <style>
 /* Budget Receipt v2 — clean & modern, dataviz reference tokens.
    Surfaces/ink/status from the validated reference palette. */
@@ -307,6 +307,7 @@ body{background:linear-gradient(180deg,#16413a 0px,#10302b 300px,#0a1614 680px) 
 .logo{position:relative;display:inline-block;isolation:isolate;font-size:36px;font-weight:800;letter-spacing:-.02em;text-transform:lowercase;color:var(--ink)}
 .logo::after{content:".";color:var(--accent)}
 .logo-word{position:relative}
+.logo-accent{color:var(--accent)}
 .logo-jar{position:absolute;left:50%;top:50%;height:1.62em;width:auto;z-index:-1;
   transform:translate(-45%,-50%) skewX(-8deg);opacity:.32;
   filter:blur(.55px) drop-shadow(0 1px 1.5px rgba(69,224,166,.4));
@@ -784,7 +785,7 @@ button:focus-visible,a:focus-visible,select:focus-visible,input:focus-visible,la
 </style>
 </head>
 <body>
-<div id="root"><div class="boot mono">opening Stash…</div></div>
+<div id="root"><div class="boot mono">opening In My Stash…</div></div>
 <script>/* React 18 (UMD, inlined — fully offline) */
 /**
  * @license React
@@ -3132,23 +3133,23 @@ const STRINGS = {
     nav_home: "Home", nav_activity: "Activity", nav_trends: "Trends", nav_settings: "Settings",
     ask_stash: "Stash", ask_or: "or", ask_spend: "spend", ask_ghost: "What's in your stash?",
     v_stash: "Stash it.", v_spend: "Spend it.", v_yourcall: "Your call.", v_safetynet: "Use your safety net.",
-    lock_title: "Enter your PIN", lock_sub: "Stash is locked to keep your money private.",
-    lock_unlock_sub: "Enter your PIN to unlock Stash.", lock_forgot: "Forgot PIN?",
+    lock_title: "Enter your PIN", lock_sub: "In My Stash is locked to keep your money private.",
+    lock_unlock_sub: "Enter your PIN to unlock In My Stash.", lock_forgot: "Forgot PIN?",
     lock_erase_q: "Erase all data and start fresh? This can't be undone.", lock_erase: "Erase everything",
     btn_add: "Add", btn_cancel: "Cancel", btn_notnow: "Not now", btn_save: "Save", btn_continue: "Continue", btn_back: "Back",
-    ob_welcome_h: "Welcome to Stash",
-    ob_welcome_p: "Stash answers one question — stash it, or spend it? — from what's really in your bank, not a guess.",
+    ob_welcome_h: "Welcome to In My Stash",
+    ob_welcome_p: "In My Stash answers one question — stash it, or spend it? — from what's really in your bank, not a guess.",
     ob_getstarted: "Get started", ob_privacy_eyebrow: "Your privacy", ob_privacy_h: "Your money stays yours",
     ob_priv1: "Your data lives on your device — not on our servers.",
     ob_priv2: "Backups are end-to-end encrypted. We can't read them.",
     ob_priv3: "Nothing is sold or shared. Export or erase it all, anytime.",
-    ob_priv4: "Stash is a decision tool — not licensed financial advice.",
+    ob_priv4: "In My Stash is a decision tool — not licensed financial advice.",
     ob_read_privacy: "Read our full privacy policy →",
     ob_iunderstand: "I understand", ob_basics_h: "Two quick basics",
-    ob_ready_h: "You're all set", ob_start: "Start using Stash",
+    ob_ready_h: "You're all set", ob_start: "Start using In My Stash",
     ob_bank_eyebrow: "Optional", ob_bank_h: "Connect a bank",
     ob_bank_p: "So your spending and deposits track themselves automatically, from what's really in your accounts.",
-    ob_bank_r1: "Read-only. Stash can see balances and transactions — it can never move your money.",
+    ob_bank_r1: "Read-only. In My Stash can see balances and transactions — it can never move your money.",
     ob_bank_r2: "Your data stays encrypted on your device. We only hold a read-only key, never your login.",
     ob_bank_cta: "Connect a bank", ob_bank_add: "Connect another", ob_bank_skip: "Skip for now",
     ob_bank_pick_h: "Choose your bank", ob_bank_working: "Connecting…",
@@ -3161,95 +3162,95 @@ const STRINGS = {
     nav_home: "Inicio", nav_activity: "Actividad", nav_trends: "Tendencias", nav_settings: "Ajustes",
     ask_stash: "Guardar", ask_or: "o", ask_spend: "gastar", ask_ghost: "¿Qué hay en tu alcancía?",
     v_stash: "Guárdalo.", v_spend: "Gástalo.", v_yourcall: "Tú decides.", v_safetynet: "Usa tu colchón.",
-    lock_title: "Ingresa tu PIN", lock_sub: "Stash está bloqueado para proteger tu dinero.",
-    lock_unlock_sub: "Ingresa tu PIN para desbloquear Stash.", lock_forgot: "¿Olvidaste tu PIN?",
+    lock_title: "Ingresa tu PIN", lock_sub: "In My Stash está bloqueado para proteger tu dinero.",
+    lock_unlock_sub: "Ingresa tu PIN para desbloquear In My Stash.", lock_forgot: "¿Olvidaste tu PIN?",
     lock_erase_q: "¿Borrar todos los datos y empezar de nuevo? No se puede deshacer.", lock_erase: "Borrar todo",
     btn_add: "Añadir", btn_cancel: "Cancelar", btn_notnow: "Ahora no", btn_save: "Guardar", btn_continue: "Continuar", btn_back: "Atrás",
-    ob_welcome_h: "Bienvenido a Stash",
-    ob_welcome_p: "Stash responde una sola pregunta —¿guardar o gastar?— con lo que de verdad hay en tu banco, sin adivinar.",
+    ob_welcome_h: "Bienvenido a In My Stash",
+    ob_welcome_p: "In My Stash responde una sola pregunta —¿guardar o gastar?— con lo que de verdad hay en tu banco, sin adivinar.",
     ob_getstarted: "Empezar", ob_privacy_eyebrow: "Tu privacidad", ob_privacy_h: "Tu dinero es solo tuyo",
     ob_priv1: "Tus datos viven en tu dispositivo, no en nuestros servidores.",
     ob_priv2: "Las copias están cifradas de extremo a extremo. No podemos leerlas.",
     ob_priv3: "Nada se vende ni se comparte. Exporta o borra todo cuando quieras.",
-    ob_priv4: "Stash es una herramienta de decisión, no asesoría financiera.",
+    ob_priv4: "In My Stash es una herramienta de decisión, no asesoría financiera.",
     ob_iunderstand: "Entiendo", ob_basics_h: "Dos datos rápidos",
-    ob_ready_h: "¡Todo listo!", ob_start: "Empezar a usar Stash",
+    ob_ready_h: "¡Todo listo!", ob_start: "Empezar a usar In My Stash",
     set_language: "Idioma", set_language_system: "Predeterminado del sistema"
   },
   zh: {
     nav_home: "首页", nav_activity: "记录", nav_trends: "趋势", nav_settings: "设置",
     ask_stash: "存起来", ask_or: "还是", ask_spend: "花掉", ask_ghost: "你的存钱罐里有多少？",
     v_stash: "先存着。", v_spend: "花吧。", v_yourcall: "你来定。", v_safetynet: "动用应急金。",
-    lock_title: "输入 PIN 码", lock_sub: "Stash 已锁定，保护你的隐私。",
-    lock_unlock_sub: "输入 PIN 码解锁 Stash。", lock_forgot: "忘记 PIN 码？",
+    lock_title: "输入 PIN 码", lock_sub: "In My Stash 已锁定，保护你的隐私。",
+    lock_unlock_sub: "输入 PIN 码解锁 In My Stash。", lock_forgot: "忘记 PIN 码？",
     lock_erase_q: "清除所有数据并重新开始？此操作无法撤销。", lock_erase: "清除全部",
     btn_add: "添加", btn_cancel: "取消", btn_notnow: "暂不", btn_save: "保存", btn_continue: "继续", btn_back: "返回",
-    ob_welcome_h: "欢迎使用 Stash",
-    ob_welcome_p: "Stash 只回答一个问题——存起来还是花掉？——依据你银行里真实的余额，而不是猜测。",
+    ob_welcome_h: "欢迎使用 In My Stash",
+    ob_welcome_p: "In My Stash 只回答一个问题——存起来还是花掉？——依据你银行里真实的余额，而不是猜测。",
     ob_getstarted: "开始", ob_privacy_eyebrow: "你的隐私", ob_privacy_h: "你的钱只属于你",
     ob_priv1: "你的数据存在你的设备上，不在我们的服务器。",
     ob_priv2: "备份采用端到端加密，我们无法读取。",
     ob_priv3: "绝不出售或分享。随时可导出或全部清除。",
-    ob_priv4: "Stash 是决策工具，并非持牌理财建议。",
+    ob_priv4: "In My Stash 是决策工具，并非持牌理财建议。",
     ob_iunderstand: "我明白了", ob_basics_h: "两个小设置",
-    ob_ready_h: "都设置好了", ob_start: "开始使用 Stash",
+    ob_ready_h: "都设置好了", ob_start: "开始使用 In My Stash",
     set_language: "语言", set_language_system: "跟随系统"
   },
   vi: {
     nav_home: "Trang chủ", nav_activity: "Hoạt động", nav_trends: "Xu hướng", nav_settings: "Cài đặt",
     ask_stash: "Để dành", ask_or: "hay", ask_spend: "tiêu", ask_ghost: "Bạn để dành được bao nhiêu?",
     v_stash: "Để dành đi.", v_spend: "Cứ tiêu.", v_yourcall: "Tùy bạn.", v_safetynet: "Dùng quỹ dự phòng.",
-    lock_title: "Nhập mã PIN", lock_sub: "Stash đã khóa để bảo mật tiền của bạn.",
-    lock_unlock_sub: "Nhập mã PIN để mở khóa Stash.", lock_forgot: "Quên mã PIN?",
+    lock_title: "Nhập mã PIN", lock_sub: "In My Stash đã khóa để bảo mật tiền của bạn.",
+    lock_unlock_sub: "Nhập mã PIN để mở khóa In My Stash.", lock_forgot: "Quên mã PIN?",
     lock_erase_q: "Xóa toàn bộ dữ liệu và bắt đầu lại? Không thể hoàn tác.", lock_erase: "Xóa tất cả",
     btn_add: "Thêm", btn_cancel: "Hủy", btn_notnow: "Để sau", btn_save: "Lưu", btn_continue: "Tiếp tục", btn_back: "Quay lại",
-    ob_welcome_h: "Chào mừng đến Stash",
-    ob_welcome_p: "Stash trả lời một câu hỏi — để dành hay tiêu? — dựa trên số dư thật trong ngân hàng, không phải phỏng đoán.",
+    ob_welcome_h: "Chào mừng đến In My Stash",
+    ob_welcome_p: "In My Stash trả lời một câu hỏi — để dành hay tiêu? — dựa trên số dư thật trong ngân hàng, không phải phỏng đoán.",
     ob_getstarted: "Bắt đầu", ob_privacy_eyebrow: "Quyền riêng tư", ob_privacy_h: "Tiền của bạn là của bạn",
     ob_priv1: "Dữ liệu nằm trên thiết bị của bạn, không phải máy chủ của chúng tôi.",
     ob_priv2: "Bản sao lưu được mã hóa đầu-cuối. Chúng tôi không đọc được.",
     ob_priv3: "Không bán hay chia sẻ. Xuất hoặc xóa hết bất cứ lúc nào.",
-    ob_priv4: "Stash là công cụ hỗ trợ quyết định, không phải tư vấn tài chính.",
+    ob_priv4: "In My Stash là công cụ hỗ trợ quyết định, không phải tư vấn tài chính.",
     ob_iunderstand: "Tôi hiểu", ob_basics_h: "Hai thông tin nhanh",
-    ob_ready_h: "Xong rồi!", ob_start: "Bắt đầu dùng Stash",
+    ob_ready_h: "Xong rồi!", ob_start: "Bắt đầu dùng In My Stash",
     set_language: "Ngôn ngữ", set_language_system: "Theo hệ thống"
   },
   tl: {
     nav_home: "Home", nav_activity: "Aktibidad", nav_trends: "Trends", nav_settings: "Mga Setting",
     ask_stash: "Itago", ask_or: "o", ask_spend: "gastusin", ask_ghost: "Magkano ang naitago mo?",
     v_stash: "Itago mo.", v_spend: "Gastusin mo.", v_yourcall: "Ikaw ang bahala.", v_safetynet: "Gamitin ang ipon mo.",
-    lock_title: "Ilagay ang PIN", lock_sub: "Naka-lock ang Stash para pribado ang pera mo.",
-    lock_unlock_sub: "Ilagay ang PIN para i-unlock ang Stash.", lock_forgot: "Nakalimutan ang PIN?",
+    lock_title: "Ilagay ang PIN", lock_sub: "Naka-lock ang In My Stash para pribado ang pera mo.",
+    lock_unlock_sub: "Ilagay ang PIN para i-unlock ang In My Stash.", lock_forgot: "Nakalimutan ang PIN?",
     lock_erase_q: "Burahin lahat ng data at magsimula ulit? Hindi ito maibabalik.", lock_erase: "Burahin lahat",
     btn_add: "Idagdag", btn_cancel: "Kanselahin", btn_notnow: "Sa ibang pagkakataon", btn_save: "I-save", btn_continue: "Magpatuloy", btn_back: "Bumalik",
-    ob_welcome_h: "Maligayang pagdating sa Stash",
-    ob_welcome_p: "Sinasagot ng Stash ang isang tanong — itago o gastusin? — base sa totoong laman ng bangko mo, hindi hula.",
+    ob_welcome_h: "Maligayang pagdating sa In My Stash",
+    ob_welcome_p: "Sinasagot ng In My Stash ang isang tanong — itago o gastusin? — base sa totoong laman ng bangko mo, hindi hula.",
     ob_getstarted: "Magsimula", ob_privacy_eyebrow: "Iyong privacy", ob_privacy_h: "Sa iyo lang ang pera mo",
     ob_priv1: "Nasa device mo ang data, hindi sa aming server.",
     ob_priv2: "Naka-end-to-end encrypt ang backup. Hindi namin ito mababasa.",
     ob_priv3: "Walang ibinebenta o ibinabahagi. Puwedeng i-export o burahin anumang oras.",
-    ob_priv4: "Ang Stash ay tool sa pagdedesisyon, hindi lisensyadong payo sa pera.",
+    ob_priv4: "Ang In My Stash ay tool sa pagdedesisyon, hindi lisensyadong payo sa pera.",
     ob_iunderstand: "Naiintindihan ko", ob_basics_h: "Dalawang mabilis",
-    ob_ready_h: "Handa ka na!", ob_start: "Simulan ang Stash",
+    ob_ready_h: "Handa ka na!", ob_start: "Simulan ang In My Stash",
     set_language: "Wika", set_language_system: "Depende sa system"
   },
   ko: {
     nav_home: "홈", nav_activity: "활동", nav_trends: "추세", nav_settings: "설정",
     ask_stash: "저축", ask_or: "아니면", ask_spend: "지출", ask_ghost: "얼마나 모았나요?",
     v_stash: "저축하세요.", v_spend: "지출하세요.", v_yourcall: "선택은 당신 몫.", v_safetynet: "비상금을 쓰세요.",
-    lock_title: "PIN 입력", lock_sub: "돈을 안전하게 지키려고 Stash를 잠갔어요.",
-    lock_unlock_sub: "PIN을 입력해 Stash 잠금을 해제하세요.", lock_forgot: "PIN을 잊으셨나요?",
+    lock_title: "PIN 입력", lock_sub: "돈을 안전하게 지키려고 In My Stash를 잠갔어요.",
+    lock_unlock_sub: "PIN을 입력해 In My Stash 잠금을 해제하세요.", lock_forgot: "PIN을 잊으셨나요?",
     lock_erase_q: "모든 데이터를 지우고 새로 시작할까요? 되돌릴 수 없어요.", lock_erase: "전체 삭제",
     btn_add: "추가", btn_cancel: "취소", btn_notnow: "나중에", btn_save: "저장", btn_continue: "계속", btn_back: "뒤로",
-    ob_welcome_h: "Stash에 오신 걸 환영해요",
-    ob_welcome_p: "Stash는 한 가지 질문에 답해요 — 저축할까, 쓸까? — 추측이 아니라 실제 잔액을 기준으로요.",
+    ob_welcome_h: "In My Stash에 오신 걸 환영해요",
+    ob_welcome_p: "In My Stash는 한 가지 질문에 답해요 — 저축할까, 쓸까? — 추측이 아니라 실제 잔액을 기준으로요.",
     ob_getstarted: "시작하기", ob_privacy_eyebrow: "개인정보", ob_privacy_h: "당신의 돈은 당신 것",
     ob_priv1: "데이터는 우리 서버가 아니라 당신 기기에 있어요.",
     ob_priv2: "백업은 종단 간 암호화돼요. 우리도 못 읽어요.",
     ob_priv3: "판매하거나 공유하지 않아요. 언제든 내보내거나 전부 지울 수 있어요.",
-    ob_priv4: "Stash는 결정 도구예요 — 공인 금융 자문이 아니에요.",
+    ob_priv4: "In My Stash는 결정 도구예요 — 공인 금융 자문이 아니에요.",
     ob_iunderstand: "이해했어요", ob_basics_h: "간단한 두 가지",
-    ob_ready_h: "준비 완료!", ob_start: "Stash 시작하기",
+    ob_ready_h: "준비 완료!", ob_start: "In My Stash 시작하기",
     set_language: "언어", set_language_system: "시스템 기본값"
   }
 };
@@ -3561,7 +3562,7 @@ function TypeOn({ text }) {
 // squirreling money into a jar. The jar is a flat silhouette, skewed and
 // theme-toned so it reads as a shadow the word throws, not a separate icon.
 function LogoMark() {
-  return /* @__PURE__ */ React.createElement("div", { className: "logo" }, /* @__PURE__ */ React.createElement("svg", { className: "logo-jar", viewBox: "0 0 40 54", "aria-hidden": true }, /* @__PURE__ */ React.createElement("rect", { className: "lj-lid", x: 8.5, y: 2, width: 23, height: 7.4, rx: 2.7 }), /* @__PURE__ */ React.createElement("path", { className: "lj-body", d: "M13 9.4 H27 V13.8 C31 14.8 34.6 17.4 34.6 22 V46.8 C34.6 50.6 32 52 28.4 52 H11.6 C8 52 5.4 50.6 5.4 46.8 V22 C5.4 17.4 9 14.8 13 13.8 Z" })), /* @__PURE__ */ React.createElement("span", { className: "logo-word" }, "Stash"));
+  return /* @__PURE__ */ React.createElement("div", { className: "logo" }, /* @__PURE__ */ React.createElement("svg", { className: "logo-jar", viewBox: "0 0 40 54", "aria-hidden": true }, /* @__PURE__ */ React.createElement("rect", { className: "lj-lid", x: 8.5, y: 2, width: 23, height: 7.4, rx: 2.7 }), /* @__PURE__ */ React.createElement("path", { className: "lj-body", d: "M13 9.4 H27 V13.8 C31 14.8 34.6 17.4 34.6 22 V46.8 C34.6 50.6 32 52 28.4 52 H11.6 C8 52 5.4 50.6 5.4 46.8 V22 C5.4 17.4 9 14.8 13 13.8 Z" })), /* @__PURE__ */ React.createElement("span", { className: "logo-word" }, "inmy", /* @__PURE__ */ React.createElement("span", { className: "logo-accent" }, "stash")));
 }
 function PocketMark({ size }) {
   const w = size || 30;
@@ -3774,7 +3775,7 @@ function App() {
     },
     onForgot: () => { try { localStorage.removeItem("budget:sync:v1"); } catch (e) {} STORE.wipe().finally(() => location.reload()); }
   });
-  if (data === null) return /* @__PURE__ */ React.createElement("div", { className: "shell" }, /* @__PURE__ */ React.createElement("div", { className: "boot" }, "opening Stash\u2026"));
+  if (data === null) return /* @__PURE__ */ React.createElement("div", { className: "shell" }, /* @__PURE__ */ React.createElement("div", { className: "boot" }, "opening In My Stash\u2026"));
   return /* @__PURE__ */ React.createElement(Main, { ...{ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, syncInfo, runSync, bootUnlocked } });
 }
 /* ---- App lock: a 6-digit PIN. The PIN is never stored — only a salted
@@ -3892,12 +3893,12 @@ function LockSetup({ settings, setSetting, data }) {
   if (!on) {
     return mode === "create"
       ? /* @__PURE__ */ React.createElement("div", { className: "lock-setup" }, pinInput(p1, setP1, "New 6-digit PIN"), pinInput(p2, setP2, "Confirm PIN"), /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: enable, disabled: busy }, "Turn on app lock"), /* @__PURE__ */ React.createElement("button", { className: "btn quiet", onClick: reset }, "Cancel"), errEl)
-      : /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "sub", style: { marginTop: 0, marginBottom: 10 } }, "Lock Stash behind a 6-digit PIN so balances stay private if your phone is lost or borrowed."), /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: () => setMode("create") }, "Turn on app lock"));
+      : /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "sub", style: { marginTop: 0, marginBottom: 10 } }, "Lock In My Stash behind a 6-digit PIN so balances stay private if your phone is lost or borrowed."), /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: () => setMode("create") }, "Turn on app lock"));
   }
   if (mode === "change") return /* @__PURE__ */ React.createElement("div", { className: "lock-setup" }, pinInput(cur, setCur, "Current PIN"), pinInput(p1, setP1, "New PIN"), pinInput(p2, setP2, "Confirm new PIN"), /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: change, disabled: busy }, "Save new PIN"), /* @__PURE__ */ React.createElement("button", { className: "btn quiet", onClick: reset }, "Cancel"), errEl);
   if (mode === "off") return /* @__PURE__ */ React.createElement("div", { className: "lock-setup" }, pinInput(cur, setCur, "Enter PIN to turn off"), /* @__PURE__ */ React.createElement("button", { className: "btn danger-quiet", onClick: disable, disabled: busy }, "Turn off app lock"), /* @__PURE__ */ React.createElement("button", { className: "btn quiet", onClick: reset }, "Cancel"), errEl);
   return /* @__PURE__ */ React.createElement("div", null,
-    /* @__PURE__ */ React.createElement("div", { className: "sub", style: { marginTop: 0 } }, "✓ App lock is on — Stash asks for your PIN when you come back."),
+    /* @__PURE__ */ React.createElement("div", { className: "sub", style: { marginTop: 0 } }, "✓ App lock is on — In My Stash asks for your PIN when you come back."),
     /* @__PURE__ */ React.createElement("div", { className: "lock-row" }, /* @__PURE__ */ React.createElement("span", null, "Auto-lock"), /* @__PURE__ */ React.createElement("select", { value: rec.autoLockSec == null ? 30 : rec.autoLockSec, onChange: (e) => setSetting("lock", { ...rec, autoLockSec: +e.target.value }) }, /* @__PURE__ */ React.createElement("option", { value: 0 }, "Immediately"), /* @__PURE__ */ React.createElement("option", { value: 30 }, "After 30s away"), /* @__PURE__ */ React.createElement("option", { value: 60 }, "After 1 min"), /* @__PURE__ */ React.createElement("option", { value: 300 }, "After 5 min"))),
     /* @__PURE__ */ React.createElement("div", { className: "btn-row", style: { marginTop: 12 } }, /* @__PURE__ */ React.createElement("button", { className: "btn quiet", onClick: () => setMode("change") }, "Change PIN"), /* @__PURE__ */ React.createElement("button", { className: "btn danger-quiet", onClick: () => setMode("off") }, "Turn off")));
 }
@@ -3929,7 +3930,7 @@ function LockRequired({ data, setSetting, onRemoveBanks }) {
       /* @__PURE__ */ React.createElement(PocketMark, { size: 44 }),
       /* @__PURE__ */ React.createElement("div", { className: "ob-eyebrow" }, "Required"),
       /* @__PURE__ */ React.createElement("h1", { className: "ob-h" }, "Lock your bank data"),
-      /* @__PURE__ */ React.createElement("p", { className: "ob-p" }, "You've connected a bank, so Stash needs a 6-digit PIN. Your data is encrypted with it and stays on this device."),
+      /* @__PURE__ */ React.createElement("p", { className: "ob-p" }, "You've connected a bank, so In My Stash needs a 6-digit PIN. Your data is encrypted with it and stays on this device."),
       /* @__PURE__ */ React.createElement("div", { className: "ob-fields" }, field(p1, setP1, "New 6-digit PIN"), field(p2, setP2, "Confirm PIN")),
       msg ? /* @__PURE__ */ React.createElement("div", { className: "hint", style: { color: "var(--crit)", textAlign: "center" } }, msg) : null,
       /* @__PURE__ */ React.createElement("div", { className: "ob-actions" },
@@ -4080,7 +4081,7 @@ function BankConnect({ settings, setSetting, disconnectBank }) {
   // returns with a setup token to paste here.
   const tokenPanel = phase === "token" && /* @__PURE__ */ React.createElement("div", { className: "bank-pick" },
     /* @__PURE__ */ React.createElement("div", { className: "bank-pick-h" }, "Finish connecting"),
-    /* @__PURE__ */ React.createElement("div", { className: "bank-secure" }, "A tab opened at your bank's secure login. After you connect there, copy the setup token it gives you and paste it below. Stash never sees your bank password."),
+    /* @__PURE__ */ React.createElement("div", { className: "bank-secure" }, "A tab opened at your bank's secure login. After you connect there, copy the setup token it gives you and paste it below. In My Stash never sees your bank password."),
     /* @__PURE__ */ React.createElement("textarea", { className: "bank-token-in", rows: 3, placeholder: "Paste your SimpleFIN setup token", value: setupToken, autoCapitalize: "none", autoCorrect: "off", spellCheck: false, onChange: (e) => setSetupToken(e.target.value) }),
     /* @__PURE__ */ React.createElement("button", { className: "btn primary", disabled: !setupToken.trim(), onClick: finishRedirect }, "Finish connecting"),
     /* @__PURE__ */ React.createElement("button", { className: "btn quiet", onClick: () => { setPhase("idle"); setSession(null); setSetupToken(""); } }, tr("btn_cancel")));
@@ -5454,7 +5455,7 @@ function SimpleHome(p) {
       onClick: () => p.setTab("settings")
     },
     "Set your balance in Settings \u2192"
-  )), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "Left over \xB7 ", monthLabel(month)), /* @__PURE__ */ React.createElement("div", { className: "jarhero" }, /* @__PURE__ */ React.createElement(AnimatedFmt0, { cents: monthNet, className: "bank-val" + (monthNet < 0 ? " overspent" : "") }), /* @__PURE__ */ React.createElement(Jar, { level: leftLevel, size: 30, tint: monthNet < 0 ? "var(--crit)" : void 0, tid: "left" })), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, fmt0(monthIncomeC), " in \xB7 ", fmt0(outC), " out", savedMTD > 0 ? " \xB7 " + fmt0(savedMTD) + " saved" : ""), perDay != null && /* @__PURE__ */ React.createElement("div", { className: "perday" }, "\u2248 ", money(perDay), "/day \xB7 ", daysLeft, "d left")), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "On pace \xB7 ", monthLabel(month)), projectedEnd != null ? /* @__PURE__ */ React.createElement(AnimatedFmt0, { cents: projectedEnd, plus: true, className: "bank-val" + (projectedEnd < 0 ? " overspent" : "") }) : /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "bank-val", style: { opacity: 0.5 } }, "\u2014"), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, "a few days of spending and this shows where ", monthLabel(month), " is headed")))), /* @__PURE__ */ React.createElement("section", { className: "card center ask-card" + (v ? " open" : "") }, /* @__PURE__ */ React.createElement("div", { className: "eyebrow ask-title" }, /* @__PURE__ */ React.createElement(FlipWord, { verdict: v && v.verdict }), /* @__PURE__ */ React.createElement("button", { className: "info-i", "aria-label": "How this works", onClick: () => setHelpOpen(!helpOpen) }, "i")), helpOpen && /* @__PURE__ */ React.createElement("div", { className: "ask-help" }, "Type a price and pick its category — needs get more slack than fun. Stash checks it against your bank and goals, then answers."), /* @__PURE__ */ React.createElement("div", { className: "ask-wrap", onClick: () => { if (askRef.current) askRef.current.focus(); } }, /* @__PURE__ */ React.createElement("span", { className: "ask-ghost" }, "$", amt ? "" : "0"), /* @__PURE__ */ React.createElement("input", {
+  )), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "Left over \xB7 ", monthLabel(month)), /* @__PURE__ */ React.createElement("div", { className: "jarhero" }, /* @__PURE__ */ React.createElement(AnimatedFmt0, { cents: monthNet, className: "bank-val" + (monthNet < 0 ? " overspent" : "") }), /* @__PURE__ */ React.createElement(Jar, { level: leftLevel, size: 30, tint: monthNet < 0 ? "var(--crit)" : void 0, tid: "left" })), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, fmt0(monthIncomeC), " in \xB7 ", fmt0(outC), " out", savedMTD > 0 ? " \xB7 " + fmt0(savedMTD) + " saved" : ""), perDay != null && /* @__PURE__ */ React.createElement("div", { className: "perday" }, "\u2248 ", money(perDay), "/day \xB7 ", daysLeft, "d left")), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "On pace \xB7 ", monthLabel(month)), projectedEnd != null ? /* @__PURE__ */ React.createElement(AnimatedFmt0, { cents: projectedEnd, plus: true, className: "bank-val" + (projectedEnd < 0 ? " overspent" : "") }) : /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "bank-val", style: { opacity: 0.5 } }, "\u2014"), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, "a few days of spending and this shows where ", monthLabel(month), " is headed")))), /* @__PURE__ */ React.createElement("section", { className: "card center ask-card" + (v ? " open" : "") }, /* @__PURE__ */ React.createElement("div", { className: "eyebrow ask-title" }, /* @__PURE__ */ React.createElement(FlipWord, { verdict: v && v.verdict }), /* @__PURE__ */ React.createElement("button", { className: "info-i", "aria-label": "How this works", onClick: () => setHelpOpen(!helpOpen) }, "i")), helpOpen && /* @__PURE__ */ React.createElement("div", { className: "ask-help" }, "Type a price and pick its category — needs get more slack than fun. In My Stash checks it against your bank and goals, then answers."), /* @__PURE__ */ React.createElement("div", { className: "ask-wrap", onClick: () => { if (askRef.current) askRef.current.focus(); } }, /* @__PURE__ */ React.createElement("span", { className: "ask-ghost" }, "$", amt ? "" : "0"), /* @__PURE__ */ React.createElement("input", {
     ref: askRef,
     className: "ask-input",
     type: "text",
@@ -5590,7 +5591,7 @@ function Trends(p) {
     }
     // Building vs growth coaching, tuned to how much room you have.
     if (hasRunway && runway < T) {
-      return "🌱 You're at " + runway.toFixed(1) + " months of cushion, building toward your " + T + "-month goal. Stash leans a little cautious until you get there — every set-aside counts.";
+      return "🌱 You're at " + runway.toFixed(1) + " months of cushion, building toward your " + T + "-month goal. In My Stash leans a little cautious until you get there — every set-aside counts.";
     }
     if (hasRunway) {
       return "🚀 " + runway.toFixed(1) + " months saved — past your safety goal. From here it's opportunity cost: even $50/week of wants is about " + fmt0(C.c(50) * 52) + " a year.";
@@ -6217,7 +6218,7 @@ function Settings(p) {
         }
       }
     ))
-  ), /* @__PURE__ */ React.createElement(Acc, { title: tr("set_banks"), cap: (settings.bankLinks || []).length ? ((settings.bankLinks.length) + " bank" + (settings.bankLinks.length === 1 ? "" : "s")) : tr("set_banks_none") }, /* @__PURE__ */ React.createElement("div", { className: "sub", style: { marginTop: 0, marginBottom: 12 } }, "Read-only connections. Stash can see balances and transactions — it can never move your money, and your data stays encrypted on this device."), syncCfg && syncCfg.enabled && /* @__PURE__ */ React.createElement("div", { className: "hint", style: { marginTop: 0, marginBottom: 12 } }, "Adding or removing a bank takes effect on this device right away. Your other devices catch up at the next sync — not instantly."), /* @__PURE__ */ React.createElement("div", { className: "bank-src" }, /* @__PURE__ */ React.createElement("span", null, "Connection source"), /* @__PURE__ */ React.createElement("select", { value: settings.bankProviderMode === "relay" || settings.bankProviderMode === "plaid" ? settings.bankProviderMode : "mock", onChange: (e) => setSetting("bankProviderMode", e.target.value), "aria-label": "Bank connection source" }, /* @__PURE__ */ React.createElement("option", { value: "mock" }, "Demo (simulated)"), /* @__PURE__ */ React.createElement("option", { value: "plaid" }, "Live · Plaid (tap & log in)"), /* @__PURE__ */ React.createElement("option", { value: "relay" }, "Live · SimpleFIN (paste token)"))), /* @__PURE__ */ React.createElement(BankConnect, { settings, setSetting, disconnectBank })), /* @__PURE__ */ React.createElement(Acc, { title: "Recurring & upcoming", cap: (settings.commitments || []).length ? (settings.commitments.length + " item" + (settings.commitments.length === 1 ? "" : "s")) : "auto" }, /* @__PURE__ */ React.createElement(CommitmentsSetup, { settings, setSetting })), /* @__PURE__ */ React.createElement(Acc, { title: "App & data", cap: syncCfg && syncCfg.enabled ? "sync on" : "sync off" }, /* @__PURE__ */ React.createElement("div", { className: "lock-row", style: { marginTop: 0, marginBottom: 10 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 16, fontWeight: 700, letterSpacing: "-.01em", color: "var(--ink)" } }, tr("set_language")), /* @__PURE__ */ React.createElement("select", { value: settings.lang || "system", onChange: (e) => setSetting("lang", e.target.value), "aria-label": tr("set_language") }, /* @__PURE__ */ React.createElement("option", { value: "system" }, tr("set_language_system")), Object.keys(LANG_NAMES).map((code) => /* @__PURE__ */ React.createElement("option", { key: code, value: code }, LANG_NAMES[code])))), /* @__PURE__ */ React.createElement("div", { className: "lock-row", style: { marginTop: 0, marginBottom: 10 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 16, fontWeight: 700, letterSpacing: "-.01em", color: "var(--ink)" } }, "Text size"), /* @__PURE__ */ React.createElement("select", { value: String(settings.uiScale || 1), onChange: (e) => setSetting("uiScale", +e.target.value), "aria-label": "Text size" }, /* @__PURE__ */ React.createElement("option", { value: "1" }, "Default"), /* @__PURE__ */ React.createElement("option", { value: "1.15" }, "Large"), /* @__PURE__ */ React.createElement("option", { value: "1.3" }, "Largest"))), /* @__PURE__ */ React.createElement(
+  ), /* @__PURE__ */ React.createElement(Acc, { title: tr("set_banks"), cap: (settings.bankLinks || []).length ? ((settings.bankLinks.length) + " bank" + (settings.bankLinks.length === 1 ? "" : "s")) : tr("set_banks_none") }, /* @__PURE__ */ React.createElement("div", { className: "sub", style: { marginTop: 0, marginBottom: 12 } }, "Read-only connections. In My Stash can see balances and transactions — it can never move your money, and your data stays encrypted on this device."), syncCfg && syncCfg.enabled && /* @__PURE__ */ React.createElement("div", { className: "hint", style: { marginTop: 0, marginBottom: 12 } }, "Adding or removing a bank takes effect on this device right away. Your other devices catch up at the next sync — not instantly."), /* @__PURE__ */ React.createElement("div", { className: "bank-src" }, /* @__PURE__ */ React.createElement("span", null, "Connection source"), /* @__PURE__ */ React.createElement("select", { value: settings.bankProviderMode === "relay" || settings.bankProviderMode === "plaid" ? settings.bankProviderMode : "mock", onChange: (e) => setSetting("bankProviderMode", e.target.value), "aria-label": "Bank connection source" }, /* @__PURE__ */ React.createElement("option", { value: "mock" }, "Demo (simulated)"), /* @__PURE__ */ React.createElement("option", { value: "plaid" }, "Live · Plaid (tap & log in)"), /* @__PURE__ */ React.createElement("option", { value: "relay" }, "Live · SimpleFIN (paste token)"))), /* @__PURE__ */ React.createElement(BankConnect, { settings, setSetting, disconnectBank })), /* @__PURE__ */ React.createElement(Acc, { title: "Recurring & upcoming", cap: (settings.commitments || []).length ? (settings.commitments.length + " item" + (settings.commitments.length === 1 ? "" : "s")) : "auto" }, /* @__PURE__ */ React.createElement(CommitmentsSetup, { settings, setSetting })), /* @__PURE__ */ React.createElement(Acc, { title: "App & data", cap: syncCfg && syncCfg.enabled ? "sync on" : "sync off" }, /* @__PURE__ */ React.createElement("div", { className: "lock-row", style: { marginTop: 0, marginBottom: 10 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 16, fontWeight: 700, letterSpacing: "-.01em", color: "var(--ink)" } }, tr("set_language")), /* @__PURE__ */ React.createElement("select", { value: settings.lang || "system", onChange: (e) => setSetting("lang", e.target.value), "aria-label": tr("set_language") }, /* @__PURE__ */ React.createElement("option", { value: "system" }, tr("set_language_system")), Object.keys(LANG_NAMES).map((code) => /* @__PURE__ */ React.createElement("option", { key: code, value: code }, LANG_NAMES[code])))), /* @__PURE__ */ React.createElement("div", { className: "lock-row", style: { marginTop: 0, marginBottom: 10 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 16, fontWeight: 700, letterSpacing: "-.01em", color: "var(--ink)" } }, "Text size"), /* @__PURE__ */ React.createElement("select", { value: String(settings.uiScale || 1), onChange: (e) => setSetting("uiScale", +e.target.value), "aria-label": "Text size" }, /* @__PURE__ */ React.createElement("option", { value: "1" }, "Default"), /* @__PURE__ */ React.createElement("option", { value: "1.15" }, "Large"), /* @__PURE__ */ React.createElement("option", { value: "1.3" }, "Largest"))), /* @__PURE__ */ React.createElement(
     Acc,
     {
       title: "Sync across devices",
@@ -6290,7 +6291,7 @@ function Settings(p) {
     },
     /* @__PURE__ */ React.createElement("div", { className: "btn-row", style: { marginTop: 0 } }, /* @__PURE__ */ React.createElement("button", { className: "btn quiet", onClick: runCheck }, "Run self-check")),
     check && /* @__PURE__ */ React.createElement("div", { className: "selfcheck" }, check.fail === 0 ? /* @__PURE__ */ React.createElement("span", { className: "tag ok" }, "\u2713 all ", check.pass, " checks passed") : /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("span", { className: "tag over" }, "\u2715 ", check.fail, " failed"), /* @__PURE__ */ React.createElement("div", { className: "fails" }, check.log.filter((l) => l[0] === "fail").map((l) => l[1]).join("\n"))))
-  ), /* @__PURE__ */ React.createElement(Acc, { title: "App lock", cap: settings.lock && settings.lock.enabled ? "On · 6-digit PIN" : "Off" }, /* @__PURE__ */ React.createElement(LockSetup, { settings, setSetting, data })), /* @__PURE__ */ React.createElement(Acc, { title: "About" }, /* @__PURE__ */ React.createElement("div", { className: "sub", style: { marginTop: 0 } }, "Stash is a decision-support tool, not licensed financial advice. Money is stored as exact cents; totals are always recomputed from your transactions, never stored."), /* @__PURE__ */ React.createElement("div", { className: "about-links" }, /* @__PURE__ */ React.createElement("a", { href: "https://inmystash.com/privacy", target: "_blank", rel: "noopener" }, "Privacy Policy"), /* @__PURE__ */ React.createElement("a", { href: "https://inmystash.com/terms", target: "_blank", rel: "noopener" }, "Terms"), /* @__PURE__ */ React.createElement("a", { href: "https://inmystash.com/security-whitepaper", target: "_blank", rel: "noopener" }, "Security")))), (STORE.corrupted || STORE.saveFailed) && /* @__PURE__ */ React.createElement("div", { className: "footnote" }, STORE.corrupted ? "\u26A0 previous save was unreadable \u2014 a backup copy was kept" : "\u26A0 saving to this browser failed \u2014 use Export to keep your data"));
+  ), /* @__PURE__ */ React.createElement(Acc, { title: "App lock", cap: settings.lock && settings.lock.enabled ? "On · 6-digit PIN" : "Off" }, /* @__PURE__ */ React.createElement(LockSetup, { settings, setSetting, data })), /* @__PURE__ */ React.createElement(Acc, { title: "About" }, /* @__PURE__ */ React.createElement("div", { className: "sub", style: { marginTop: 0 } }, "In My Stash is a decision-support tool, not licensed financial advice. Money is stored as exact cents; totals are always recomputed from your transactions, never stored."), /* @__PURE__ */ React.createElement("div", { className: "about-links" }, /* @__PURE__ */ React.createElement("a", { href: "https://inmystash.com/privacy", target: "_blank", rel: "noopener" }, "Privacy Policy"), /* @__PURE__ */ React.createElement("a", { href: "https://inmystash.com/terms", target: "_blank", rel: "noopener" }, "Terms"), /* @__PURE__ */ React.createElement("a", { href: "https://inmystash.com/security-whitepaper", target: "_blank", rel: "noopener" }, "Security")))), (STORE.corrupted || STORE.saveFailed) && /* @__PURE__ */ React.createElement("div", { className: "footnote" }, STORE.corrupted ? "\u26A0 previous save was unreadable \u2014 a backup copy was kept" : "\u26A0 saving to this browser failed \u2014 use Export to keep your data"));
 }
 ReactDOM.createRoot(document.getElementById("root")).render(
   /* @__PURE__ */ React.createElement(Boundary, null, /* @__PURE__ */ React.createElement(App, null))
