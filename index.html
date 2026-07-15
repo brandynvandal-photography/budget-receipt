@@ -2244,7 +2244,7 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
     listAccounts: function () { return callApi("GET", "/connections").then(function (r) { return r.connections || []; }); },
     fetchTransactions: function (connectionId, sinceISO) {
       var days = 90; if (sinceISO) { var d = Math.ceil((Date.now() - new Date(sinceISO).getTime()) / 864e5); if (d > 0) days = Math.min(365, d); }
-      return callApi("POST", "/connections/" + connectionId + "/transactions", { vaultKey: vaultKey(), sinceDays: days }).then(function (r) { return { transactions: r.transactions || [], balances: r.balances || [] }; });
+      return callApi("POST", "/connections/" + connectionId + "/transactions", { vaultKey: vaultKey(), sinceDays: days }).then(function (r) { return { transactions: r.transactions || [], balances: r.balances || [], institutions: r.institutions || [] }; });
     },
     disconnect: function (connectionId) { return callApi("DELETE", "/connections/" + connectionId).catch(function () { return true; }); },
   };
@@ -4240,11 +4240,15 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     const conns = [...new Set((settings.bankLinks || []).filter((l) => l.provider === "simplefin").map((l) => l.connectionId))];
     if (!P || !conns.length) return;
     let live = true;
-    Promise.all(conns.map((cid) => P.fetchTransactions(cid).catch(() => ({ transactions: [], balances: [] }))))
-      .then((results) => {
+    Promise.all(conns.map((cid) => P.fetchTransactions(cid).then((r) => ({ cid, r })).catch(() => ({ cid, r: { transactions: [], balances: [], institutions: [] } }))))
+      .then((all) => {
         if (!live) return;
-        const txns = [], bals = [];
-        results.forEach((r) => { (r.transactions || []).forEach((t) => txns.push(t)); (r.balances || []).forEach((b) => bals.push(b)); });
+        const txns = [], bals = [], freshByConn = {};
+        all.forEach(({ cid, r }) => {
+          (r.transactions || []).forEach((t) => txns.push(t));
+          (r.balances || []).forEach((b) => bals.push(b));
+          if (r.institutions && r.institutions.length) freshByConn[cid] = r.institutions;
+        });
         if (txns.length) setInbox((prev) => {
           const byId = {};
           (prev || []).forEach((r) => { if (r && r.id) byId[r.id] = r; });
@@ -4257,6 +4261,26 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
           bals.forEach((b) => { if (b && b.account) byAcct[b.account] = b; });
           return Object.keys(byAcct).map((k) => byAcct[k]);
         });
+        // Self-heal the card list: rebuild simplefin cards from the live
+        // institution grouping so a bank whose data appears later shows up
+        // (and account lists stay current). Only write if something changed.
+        if (Object.keys(freshByConn).length) {
+          const cur = settings.bankLinks || [];
+          const out = [], handled = {};
+          cur.forEach((l) => {
+            if (l.provider === "simplefin" && freshByConn[l.connectionId]) {
+              if (handled[l.connectionId]) return;
+              handled[l.connectionId] = 1;
+              const groups = freshByConn[l.connectionId];
+              groups.forEach((g, i) => out.push({
+                id: l.connectionId + (groups.length > 1 ? "::" + i : ""), connectionId: l.connectionId,
+                provider: "simplefin", readOnly: true, institution: g.institution, accounts: g.accounts || [],
+                connectedAt: l.connectedAt || Date.now(),
+              }));
+            } else out.push(l);
+          });
+          if (JSON.stringify(out) !== JSON.stringify(cur)) setSetting("bankLinks", out);
+        }
       });
     return () => { live = false; };
   }, [settings.bankLinks]);
