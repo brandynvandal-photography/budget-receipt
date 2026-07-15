@@ -2249,6 +2249,19 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
     disconnect: function (connectionId) { return callApi("DELETE", "/connections/" + connectionId).catch(function () { return true; }); },
   };
   root.BankProviderRelay = relay;
+
+  // Plaid provider — no per-user account: the user just logs into their bank via
+  // Plaid Link. Shares the relay's fetch/disconnect (same Worker endpoints,
+  // same on-device keys); only the LINK step differs (mode "plaid-link"). The
+  // client loads Plaid's Link SDK on demand and opens it with the link token.
+  root.BankProviderPlaid = {
+    provider: "plaid", label: "Plaid", readOnly: true, mode: "plaid-link",
+    startLink: function () { return callApi("POST", "/plaid/link-token").then(function (r) { return { mode: "plaid-link", linkToken: r.linkToken }; }); },
+    complete: function (session, cred) { return callApi("POST", "/connections", { publicToken: cred && cred.publicToken, institution: cred && cred.institution, vaultKey: vaultKey() }); },
+    listAccounts: relay.listAccounts,
+    fetchTransactions: relay.fetchTransactions,
+    disconnect: relay.disconnect,
+  };
 })(typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : this));
 </script>
 <script>/* sync merge tests */
@@ -3844,9 +3857,12 @@ function BankConnect({ settings, setSetting }) {
   // The live default is the mock; a Settings toggle (bankProviderMode) switches
   // to the real SimpleFIN relay. The "mock" SIMULATES connections (no bank
   // login, no real data) — flagged loudly so it's never mistaken for real.
-  const P = (settings.bankProviderMode === "relay" && window.BankProviderRelay) ? window.BankProviderRelay : (window.BankProviderMock || window.BankProvider);
+  const P = (settings.bankProviderMode === "plaid" && window.BankProviderPlaid) ? window.BankProviderPlaid
+    : (settings.bankProviderMode === "relay" && window.BankProviderRelay) ? window.BankProviderRelay
+    : (window.BankProviderMock || window.BankProvider);
   const demo = !!(P && P.provider === "mock");
-  const redirect = !!(P && P.mode === "redirect"); // real linking opens the bank's own login
+  const redirect = !!(P && P.mode === "redirect"); // SimpleFIN: opens the bank login, then paste a token
+  const plaidLink = !!(P && P.mode === "plaid-link"); // Plaid: opens Plaid Link SDK
   const links = settings.bankLinks || [];
   const [phase, setPhase] = useState("idle"); // idle | picking | token | working | error
   const [session, setSession] = useState(null);
@@ -3886,13 +3902,38 @@ function BankConnect({ settings, setSetting }) {
     setTimeout(() => setJustAdded(null), 2200);
     setPhase("idle"); setSession(null); setInsts([]); setSetupToken("");
   };
+  const loadPlaidSdk = () => new Promise((resolve, reject) => {
+    if (window.Plaid) return resolve(window.Plaid);
+    const s = document.createElement("script");
+    s.src = "https://cdn.plaid.com/link/v2/stable/link-initialize.js";
+    s.onload = () => resolve(window.Plaid);
+    s.onerror = () => reject(new Error("plaid_sdk"));
+    document.head.appendChild(s);
+  });
   const start = () => {
     if (!P) { setErr("Bank connections aren't available right now."); setPhase("error"); return; }
     setErr(""); setPhase("working");
     P.startLink().then((r) => {
+      if (plaidLink) {
+        // Plaid: open Plaid Link (their SDK, loaded on demand). On success we
+        // get a public token to exchange server-side.
+        return loadPlaidSdk().then((Plaid) => {
+          const handler = Plaid.create({
+            token: r.linkToken,
+            onSuccess: (public_token, metadata) => {
+              setPhase("working");
+              P.complete({}, { publicToken: public_token, institution: metadata && metadata.institution }).then(saveLink)
+                .catch(() => { setErr("Couldn't finish connecting. Try again."); setPhase("error"); });
+            },
+            onExit: (e) => { setPhase("idle"); if (e && e.error_message) setErr(e.error_message); },
+          });
+          handler.open();
+          setPhase("idle"); // Plaid's own modal is now on top
+        });
+      }
       if (redirect) {
-        // real linking: open the bank's own login at the bridge, then collect
-        // the setup token the user gets back
+        // SimpleFIN: open the bank's own login at the bridge, then collect the
+        // setup token the user gets back
         if (r.connectUrl) window.open(r.connectUrl, "_blank", "noopener");
         setSession(r.session || {}); setPhase("token");
       } else {
@@ -4236,8 +4277,11 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
   // unchanged. Fetch happens only while the app is open (the privacy model);
   // the relay can't read anything on its own.
   useEffect(() => {
+    // Both SimpleFIN and Plaid connections fetch through the same relay
+    // endpoint (the Worker knows which provider each connection is), so one
+    // client fetches for both.
     const P = window.BankProviderRelay;
-    const conns = [...new Set((settings.bankLinks || []).filter((l) => l.provider === "simplefin").map((l) => l.connectionId))];
+    const conns = [...new Set((settings.bankLinks || []).filter((l) => l.provider === "simplefin" || l.provider === "plaid").map((l) => l.connectionId))];
     if (!P || !conns.length) return;
     let live = true;
     Promise.all(conns.map((cid) => P.fetchTransactions(cid).then((r) => ({ cid, r })).catch(() => ({ cid, r: { transactions: [], balances: [], institutions: [] } }))))
@@ -4268,13 +4312,13 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
           const cur = settings.bankLinks || [];
           const out = [], handled = {};
           cur.forEach((l) => {
-            if (l.provider === "simplefin" && freshByConn[l.connectionId]) {
+            if ((l.provider === "simplefin" || l.provider === "plaid") && freshByConn[l.connectionId]) {
               if (handled[l.connectionId]) return;
               handled[l.connectionId] = 1;
               const groups = freshByConn[l.connectionId];
               groups.forEach((g, i) => out.push({
                 id: l.connectionId + (groups.length > 1 ? "::" + i : ""), connectionId: l.connectionId,
-                provider: "simplefin", readOnly: true, institution: g.institution, accounts: g.accounts || [],
+                provider: l.provider, readOnly: true, institution: g.institution, accounts: g.accounts || [],
                 connectedAt: l.connectedAt || Date.now(),
               }));
             } else out.push(l);
@@ -5917,7 +5961,7 @@ function Settings(p) {
         }
       }
     ))
-  ), /* @__PURE__ */ React.createElement(Acc, { title: tr("set_banks"), cap: (settings.bankLinks || []).length ? ((settings.bankLinks.length) + " bank" + (settings.bankLinks.length === 1 ? "" : "s")) : tr("set_banks_none") }, /* @__PURE__ */ React.createElement("div", { className: "sub", style: { marginTop: 0, marginBottom: 12 } }, "Read-only connections. Stash can see balances and transactions — it can never move your money, and your data stays encrypted on this device."), syncCfg && syncCfg.enabled && /* @__PURE__ */ React.createElement("div", { className: "hint", style: { marginTop: 0, marginBottom: 12 } }, "Adding or removing a bank takes effect on this device right away. Your other devices catch up at the next sync — not instantly."), /* @__PURE__ */ React.createElement("div", { className: "bank-src" }, /* @__PURE__ */ React.createElement("span", null, "Connection source"), /* @__PURE__ */ React.createElement("select", { value: settings.bankProviderMode === "relay" ? "relay" : "mock", onChange: (e) => setSetting("bankProviderMode", e.target.value), "aria-label": "Bank connection source" }, /* @__PURE__ */ React.createElement("option", { value: "mock" }, "Demo (simulated)"), /* @__PURE__ */ React.createElement("option", { value: "relay" }, "Live · SimpleFIN"))), /* @__PURE__ */ React.createElement(BankConnect, { settings, setSetting })), /* @__PURE__ */ React.createElement(Acc, { title: "Recurring & upcoming", cap: (settings.commitments || []).length ? (settings.commitments.length + " item" + (settings.commitments.length === 1 ? "" : "s")) : "auto" }, /* @__PURE__ */ React.createElement(CommitmentsSetup, { settings, setSetting })), /* @__PURE__ */ React.createElement(Acc, { title: "App & data", cap: syncCfg && syncCfg.enabled ? "sync on" : "sync off" }, /* @__PURE__ */ React.createElement("div", { className: "lock-row", style: { marginTop: 0, marginBottom: 10 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 16, fontWeight: 700, letterSpacing: "-.01em", color: "var(--ink)" } }, tr("set_language")), /* @__PURE__ */ React.createElement("select", { value: settings.lang || "system", onChange: (e) => setSetting("lang", e.target.value), "aria-label": tr("set_language") }, /* @__PURE__ */ React.createElement("option", { value: "system" }, tr("set_language_system")), Object.keys(LANG_NAMES).map((code) => /* @__PURE__ */ React.createElement("option", { key: code, value: code }, LANG_NAMES[code])))), /* @__PURE__ */ React.createElement(
+  ), /* @__PURE__ */ React.createElement(Acc, { title: tr("set_banks"), cap: (settings.bankLinks || []).length ? ((settings.bankLinks.length) + " bank" + (settings.bankLinks.length === 1 ? "" : "s")) : tr("set_banks_none") }, /* @__PURE__ */ React.createElement("div", { className: "sub", style: { marginTop: 0, marginBottom: 12 } }, "Read-only connections. Stash can see balances and transactions — it can never move your money, and your data stays encrypted on this device."), syncCfg && syncCfg.enabled && /* @__PURE__ */ React.createElement("div", { className: "hint", style: { marginTop: 0, marginBottom: 12 } }, "Adding or removing a bank takes effect on this device right away. Your other devices catch up at the next sync — not instantly."), /* @__PURE__ */ React.createElement("div", { className: "bank-src" }, /* @__PURE__ */ React.createElement("span", null, "Connection source"), /* @__PURE__ */ React.createElement("select", { value: settings.bankProviderMode === "relay" || settings.bankProviderMode === "plaid" ? settings.bankProviderMode : "mock", onChange: (e) => setSetting("bankProviderMode", e.target.value), "aria-label": "Bank connection source" }, /* @__PURE__ */ React.createElement("option", { value: "mock" }, "Demo (simulated)"), /* @__PURE__ */ React.createElement("option", { value: "plaid" }, "Live · Plaid (tap & log in)"), /* @__PURE__ */ React.createElement("option", { value: "relay" }, "Live · SimpleFIN (paste token)"))), /* @__PURE__ */ React.createElement(BankConnect, { settings, setSetting })), /* @__PURE__ */ React.createElement(Acc, { title: "Recurring & upcoming", cap: (settings.commitments || []).length ? (settings.commitments.length + " item" + (settings.commitments.length === 1 ? "" : "s")) : "auto" }, /* @__PURE__ */ React.createElement(CommitmentsSetup, { settings, setSetting })), /* @__PURE__ */ React.createElement(Acc, { title: "App & data", cap: syncCfg && syncCfg.enabled ? "sync on" : "sync off" }, /* @__PURE__ */ React.createElement("div", { className: "lock-row", style: { marginTop: 0, marginBottom: 10 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 16, fontWeight: 700, letterSpacing: "-.01em", color: "var(--ink)" } }, tr("set_language")), /* @__PURE__ */ React.createElement("select", { value: settings.lang || "system", onChange: (e) => setSetting("lang", e.target.value), "aria-label": tr("set_language") }, /* @__PURE__ */ React.createElement("option", { value: "system" }, tr("set_language_system")), Object.keys(LANG_NAMES).map((code) => /* @__PURE__ */ React.createElement("option", { key: code, value: code }, LANG_NAMES[code])))), /* @__PURE__ */ React.createElement(
     Acc,
     {
       title: "Sync across devices",
