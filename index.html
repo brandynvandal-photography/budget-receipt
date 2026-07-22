@@ -2997,7 +2997,7 @@ const { useState, useEffect, useMemo, useCallback, useRef, Component } = React;
 const C = window.BudgetCore;
 const SEED = window.BudgetSeed;
 const STORE = window.BudgetStorage;
-const SCHEMA_VERSION = 11;
+const SCHEMA_VERSION = 12;
 const MIGRATIONS = [
   function v1_to_v2(data) {
     if (!data.sinkingFunds) data.sinkingFunds = JSON.parse(JSON.stringify(SEED.sinkingFunds));
@@ -3082,6 +3082,15 @@ const MIGRATIONS = [
       if (!t.isTransfer && (t.categoryId == null || t.categoryId === "")) t.categoryId = "gen";
     });
     data.schemaVersion = 11;
+  },
+  function v11_to_v12(data) {
+    // Re-sweep so any spend still without a category (e.g. bank rows imported
+    // after the v11 upgrade) becomes General instead of reading as an
+    // uncategorized "rent" row. Still fully editable.
+    (data.txns || []).forEach((t) => {
+      if (!t.isTransfer && (t.categoryId == null || t.categoryId === "")) t.categoryId = "gen";
+    });
+    data.schemaVersion = 12;
   }
 ];
 const SYNC_KEY = "budget:sync:v1";
@@ -4466,6 +4475,18 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     const P = window.BankProviderRelay;
     const conns = [...new Set((settings.bankLinks || []).filter((l) => l.provider === "simplefin" || l.provider === "plaid").map((l) => l.connectionId))];
     if (!P || !conns.length) return;
+    // Rate-limit: SimpleFIN caps how often you may pull, so fetch at most ONCE
+    // PER HOUR. A persisted timestamp gates it across reloads and re-renders —
+    // already-imported transactions/balances stay in the store, so a skipped
+    // pull just shows the last sync. A change in the SET of connections (e.g. a
+    // bank you just added) bypasses the gate so new banks sync immediately.
+    // Stamp BEFORE fetching so a burst of re-renders can't slip extra calls in.
+    const HOUR = 36e5;
+    const sig = conns.slice().sort().join(",");
+    let lastSync = 0, lastSig = "";
+    try { lastSync = +localStorage.getItem("stash.relay.lastSync") || 0; lastSig = localStorage.getItem("stash.relay.lastSyncSig") || ""; } catch (e) {}
+    if (sig === lastSig && Date.now() - lastSync < HOUR) return;
+    try { localStorage.setItem("stash.relay.lastSync", String(Date.now())); localStorage.setItem("stash.relay.lastSyncSig", sig); } catch (e) {}
     let live = true;
     Promise.all(conns.map((cid) => P.fetchTransactions(cid).then((r) => ({ cid, r })).catch(() => ({ cid, r: { transactions: [], balances: [], institutions: [] } }))))
       .then((all) => {
@@ -4751,7 +4772,7 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
         txns2.push({
           id, date: r.date,
           amount: r.kind === "refund" ? -r.cents : r.cents,
-          categoryId: r.kind === "transfer" ? null : r.categoryId || null,
+          categoryId: r.kind === "transfer" ? null : r.categoryId || "gen",
           merchant: r.label || "",
           account: r.account || null,
           _m: Date.now(),
