@@ -7,6 +7,10 @@
 <meta name="apple-mobile-web-app-title" content="In My Stash" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="theme-color" content="#16413a" />
+<!-- Single-file app needs inline script/style; the real protection here is
+     connect-src — the ONLY hosts this page may talk to (relay, GitHub sync,
+     Plaid, OCR assets). Anything else is blocked at the browser. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: https://cdn.plaid.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' https://stash-relay.inmystash.workers.dev https://api.github.com https://*.plaid.com https://cdn.jsdelivr.net https://tessdata.projectnaptha.com data: blob:; frame-src https://*.plaid.com; worker-src 'self' blob:; object-src 'none'; base-uri 'self'" />
 <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png" />
 <link rel="icon" type="image/png" href="apple-touch-icon.png" />
 <link rel="manifest" href="manifest.webmanifest" />
@@ -583,6 +587,14 @@ body{background:linear-gradient(180deg,#16413a 0px,#10302b 300px,#0a1614 680px) 
   100%{transform:translateY(0) scale(1) rotate(720deg);opacity:1}}
 .til-pay{font-size:13px;color:var(--ink2);text-align:center;margin:8px 0 2px}
 .til-pay b{color:var(--ink);font-weight:700}
+/* payday pocket: the pay-period buffer, promoted to its own card — it's the
+   single most actionable number on the screen */
+.paypocket{display:flex;align-items:center;justify-content:space-between;gap:14px}
+.paypocket .pp-val{font-size:30px;font-weight:800;letter-spacing:-.02em;color:var(--ink);line-height:1.1}
+.paypocket .pp-cap{font-size:13px;color:var(--ink2);margin-top:3px}
+.paypocket .pp-days{text-align:center;flex:none;border-left:1px solid var(--grid);padding-left:14px;min-width:56px}
+.paypocket .pp-d{font-size:22px;font-weight:800;color:var(--accent);line-height:1.1}
+.paypocket .pp-dl{font-size:11px;color:var(--muted);margin-top:1px}
 .til-day{color:var(--muted)}
 .ask-help{font-size:13px;color:var(--ink2);text-align:left;background:rgba(255,255,255,.04);
   border:1px solid var(--grid);border-radius:12px;padding:10px 12px;margin:10px 0 2px;line-height:1.5}
@@ -693,6 +705,7 @@ button:focus-visible,a:focus-visible,select:focus-visible,input:focus-visible,la
 .billprompt-bubble .bt-msg{font-size:17.5px;margin-bottom:16px;text-align:center}
 .billprompt-bubble .bt-row{justify-content:center}
 .billprompt-bubble .bt-sub{text-align:center}
+.billprompt-inline{max-width:none;margin:0 0 14px}
 @keyframes bp-fade{from{opacity:0}to{opacity:1}}
 @keyframes bp-pop{from{transform:translateY(14px) scale(.95);opacity:0}to{transform:none;opacity:1}}
 @media (prefers-reduced-motion:reduce){.billprompt-scrim,.billprompt-bubble{animation:none}}
@@ -2242,7 +2255,31 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
   function b64(bytes) { var s = ""; for (var i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]); return btoa(s); }
   function b64url(bytes) { return b64(bytes).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); }
   function rnd(n) { var a = new Uint8Array(n); crypto.getRandomValues(a); return a; }
-  function keep(name, gen) { var v = localStorage.getItem(name); if (!v) { v = gen(); localStorage.setItem(name, v); } return v; }
+  // Key custody: with the app-lock ON these secrets live only in MEMORY —
+  // installed after PIN unlock from settings.relayKeys inside the encrypted
+  // store — so no plaintext copy sits on disk next to the encrypted ledger.
+  // Without a lock they persist in localStorage as before.
+  var memKeys = {};
+  function keep(name, gen) {
+    if (memKeys[name]) return memKeys[name];
+    var v = null;
+    try { v = localStorage.getItem(name); } catch (e) {}
+    if (!v) { v = gen(); if (!root.__stashLockOn) { try { localStorage.setItem(name, v); } catch (e) {} } }
+    memKeys[name] = v;
+    return v;
+  }
+  root.__stashInstallRelayKeys = function (keys, lockOn) {
+    root.__stashLockOn = !!lockOn;
+    var NAMES = { userSecret: "stash.relay.userSecret", vaultKey: "stash.relay.vaultKey" };
+    Object.keys(NAMES).forEach(function (k) {
+      if (keys && keys[k]) {
+        memKeys[NAMES[k]] = keys[k];
+        if (!lockOn) { try { localStorage.setItem(NAMES[k], keys[k]); } catch (e) {} }
+      }
+    });
+    if (lockOn) { try { localStorage.removeItem(NAMES.userSecret); localStorage.removeItem(NAMES.vaultKey); } catch (e) {} }
+  };
+  root.__stashHasRelayId = function () { var v = null; try { v = localStorage.getItem("stash.relay.userSecret"); } catch (e) {} return !!(memKeys["stash.relay.userSecret"] || v); };
   var userSecret = function () { return keep("stash.relay.userSecret", function () { return b64url(rnd(32)); }); };
   var vaultKey = function () { return keep("stash.relay.vaultKey", function () { return b64(rnd(32)); }); };
   function callApi(method, path, body) {
@@ -2266,7 +2303,7 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
       var days = 90; if (sinceISO) { var d = Math.ceil((Date.now() - new Date(sinceISO).getTime()) / 864e5); if (d > 0) days = Math.min(365, d); }
       return callApi("POST", "/connections/" + connectionId + "/transactions", { vaultKey: vaultKey(), sinceDays: days }).then(function (r) { return { transactions: r.transactions || [], balances: r.balances || [], institutions: r.institutions || [] }; });
     },
-    disconnect: function (connectionId) { return callApi("DELETE", "/connections/" + connectionId).catch(function () { return true; }); },
+    disconnect: function (connectionId) { return callApi("DELETE", "/connections/" + connectionId, { vaultKey: vaultKey() }).catch(function () { return true; }); },
   };
   root.BankProviderRelay = relay;
 
@@ -3139,6 +3176,13 @@ function todayISO() {
   return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate());
 }
 const TODAY = todayISO();
+// iOS keeps PWAs resident for days; TODAY is baked into every date-derived
+// number (days-to-payday, projections, auto-ledger gates). When the app comes
+// back to the foreground on a NEW calendar day, reload — instant for a local
+// app, and every figure is honest again.
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && todayISO() !== TODAY) location.reload();
+});
 const CURRENT_MONTH = TODAY.slice(0, 7);
 
 /* ---- i18n: follows the device language by default; the core experience is
@@ -3828,6 +3872,10 @@ function LockGate({ lockRec, verify, onUnlock, onForgot, sub }) {
   const [err, setErr] = useState(false);
   const [busy, setBusy] = useState(false);
   const [wipe, setWipe] = useState(false);
+  // Brute-force throttle: after 3 wrong PINs, each further miss doubles a
+  // cooldown (2s → 4s → … capped 30s). The fail count persists so a reload
+  // doesn't reset it. Cleared on success.
+  const [cool, setCool] = useState(false);
   // auto-check when the 6th digit lands — kept out of the setState updater so
   // it stays pure (and reliable under React's double-invoke).
   useEffect(() => {
@@ -3837,13 +3885,17 @@ function LockGate({ lockRec, verify, onUnlock, onForgot, sub }) {
     Promise.resolve(verify ? verify(pin) : PinLock.verify(pin, lockRec)).then((ok) => {
       if (cancelled) return;
       setBusy(false);
-      if (ok) { buzz(8); onUnlock && onUnlock(); }
-      else { setErr(true); setPin(""); buzz([10, 40, 10]); setTimeout(() => setErr(false), 500); }
+      if (ok) { try { localStorage.removeItem("stash.lock.fails"); } catch (e) {} buzz(8); onUnlock && onUnlock(); }
+      else {
+        let f = 1; try { f = (+localStorage.getItem("stash.lock.fails") || 0) + 1; localStorage.setItem("stash.lock.fails", String(f)); } catch (e) {}
+        if (f >= 3) { setCool(true); setTimeout(() => setCool(false), Math.min(3e4, 1e3 * Math.pow(2, f - 2))); }
+        setErr(true); setPin(""); buzz([10, 40, 10]); setTimeout(() => setErr(false), 500);
+      }
     });
     return () => { cancelled = true; };
   }, [pin]);
-  const push = (d) => { if (!busy) setPin((p) => p.length >= LOCK_LEN ? p : p + d); };
-  const back = () => { if (!busy) setPin((p) => p.slice(0, -1)); };
+  const push = (d) => { if (!busy && !cool) setPin((p) => p.length >= LOCK_LEN ? p : p + d); };
+  const back = () => { if (!busy && !cool) setPin((p) => p.slice(0, -1)); };
   // hardware keyboard: number keys type the PIN, Backspace/Delete removes a
   // digit (mirrors the on-screen pad). Numpad keys report the same e.key.
   useEffect(() => {
@@ -3861,6 +3913,7 @@ function LockGate({ lockRec, verify, onUnlock, onForgot, sub }) {
     /* @__PURE__ */ React.createElement("div", { className: "lock-title" }, tr("lock_title")),
     /* @__PURE__ */ React.createElement("div", { className: "lock-sub" }, sub || tr("lock_sub")),
     /* @__PURE__ */ React.createElement("div", { className: "lock-dots" + (err ? " shake" : "") }, Array.from({ length: LOCK_LEN }).map((_, i) => /* @__PURE__ */ React.createElement("span", { key: i, className: "lock-dot" + (i < pin.length ? " on" : "") + (err ? " err" : "") }))),
+    /* @__PURE__ */ React.createElement("div", { className: "lock-sub", role: "status", "aria-live": "polite", style: { minHeight: "1.2em" } }, cool ? "Too many tries — hold on a moment…" : err ? "Wrong PIN — try again." : ""),
     /* @__PURE__ */ React.createElement("div", { className: "lock-pad" }, keys.map((k, i) => k === "" ? /* @__PURE__ */ React.createElement("span", { key: i }) : /* @__PURE__ */ React.createElement("button", { key: i, className: "lock-key" + (k === "⌫" ? " ghost" : ""), onClick: k === "⌫" ? back : () => push(k), disabled: busy, "aria-label": k === "⌫" ? "Delete" : k }, k))),
     wipe
       ? /* @__PURE__ */ React.createElement("div", { className: "lock-forgot" }, /* @__PURE__ */ React.createElement("div", { className: "lock-warn" }, tr("lock_erase_q")), /* @__PURE__ */ React.createElement("div", { className: "lock-forgot-row" }, /* @__PURE__ */ React.createElement("button", { className: "btn quiet", onClick: () => setWipe(false) }, tr("btn_cancel")), /* @__PURE__ */ React.createElement("button", { className: "btn danger-quiet", onClick: onForgot }, tr("lock_erase"))))
@@ -3972,9 +4025,12 @@ function BankConnect({ settings, setSetting, disconnectBank }) {
   // The live default is the mock; a Settings toggle (bankProviderMode) switches
   // to the real SimpleFIN relay. The "mock" SIMULATES connections (no bank
   // login, no real data) — flagged loudly so it's never mistaken for real.
-  const P = (settings.bankProviderMode === "plaid" && window.BankProviderPlaid) ? window.BankProviderPlaid
+  // Default = REAL Plaid. The simulated demo only appears when explicitly
+  // chosen in Settings — a store customer must never connect a fake bank by
+  // default and wonder why nothing imports.
+  const P = (settings.bankProviderMode === "mock") ? (window.BankProviderMock || window.BankProvider)
     : (settings.bankProviderMode === "relay" && window.BankProviderRelay) ? window.BankProviderRelay
-    : (window.BankProviderMock || window.BankProvider);
+    : (window.BankProviderPlaid || window.BankProviderRelay || window.BankProviderMock || window.BankProvider);
   const demo = !!(P && P.provider === "mock");
   const redirect = !!(P && P.mode === "redirect"); // SimpleFIN: opens the bank login, then paste a token
   const plaidLink = !!(P && P.mode === "plaid-link"); // Plaid: opens Plaid Link SDK
@@ -4121,11 +4177,20 @@ function Onboarding({ settings, setSetting, setTab }) {
   const pay0 = settings.paycheck || {};
   const [payDate, setPayDate] = useState(pay0.payDate || "");
   const [sched, setSched] = useState(pay0.schedule || "biweekly");
+  const [payAmt, setPayAmt] = useState(pay0.amount ? (pay0.amount / 100).toFixed(0) : "");
   const N = 5;
   const finish = (goSettings) => {
     const c = C.parseDollars(floor);
     if (c != null && c >= 0) setSetting("balanceFloor", c);
-    if (payDate) setSetting("paycheck", { ...(settings.paycheck || {}), payDate, schedule: sched });
+    const pa = C.parseDollars(payAmt);
+    // paycheck amount seeds the monthly plan too (×26/12 biweekly, ×52/12
+    // weekly, ×2 semimonthly) so a brand-new user's first verdict has real
+    // numbers behind it instead of a $0 month.
+    if (payDate || (pa != null && pa > 0)) setSetting("paycheck", { ...(settings.paycheck || {}), ...(payDate ? { payDate } : {}), schedule: sched, ...(pa != null && pa > 0 ? { amount: pa } : {}) });
+    if (pa != null && pa > 0 && !(settings.monthlyIncome > 0)) {
+      const mult = sched === "weekly" ? 52 / 12 : sched === "biweekly" ? 26 / 12 : sched === "semimonthly" ? 2 : 1;
+      setSetting("monthlyIncome", Math.round(pa * mult));
+    }
     setSetting("onboarded", true);
     setTab(goSettings ? "settings" : "home");
   };
@@ -4166,7 +4231,8 @@ function Onboarding({ settings, setSetting, setTab }) {
       /* @__PURE__ */ React.createElement("p", { className: "ob-p" }, "Both optional — change them anytime in Settings."),
       /* @__PURE__ */ React.createElement("div", { className: "ob-fields" },
         /* @__PURE__ */ React.createElement("div", { className: "ob-field" }, /* @__PURE__ */ React.createElement("label", null, "Never let my bank drop below", /* @__PURE__ */ React.createElement("span", { className: "f-sub" }, "We'll warn you before a buy crosses it.")), /* @__PURE__ */ React.createElement("input", { type: "number", inputMode: "decimal", placeholder: "$  e.g. 200", value: floor, onChange: (e) => setFloor(e.target.value) })),
-        /* @__PURE__ */ React.createElement("div", { className: "ob-field" }, /* @__PURE__ */ React.createElement("label", null, "Next payday", /* @__PURE__ */ React.createElement("span", { className: "f-sub" }, "Powers “days until payday” on Home.")), /* @__PURE__ */ React.createElement("input", { type: "date", value: payDate, onChange: (e) => setPayDate(e.target.value) }), /* @__PURE__ */ React.createElement("select", { value: sched, onChange: (e) => setSched(e.target.value), style: { marginTop: 8 } }, /* @__PURE__ */ React.createElement("option", { value: "weekly" }, "Weekly"), /* @__PURE__ */ React.createElement("option", { value: "biweekly" }, "Every 2 weeks"), /* @__PURE__ */ React.createElement("option", { value: "semimonthly" }, "Twice a month"), /* @__PURE__ */ React.createElement("option", { value: "monthly" }, "Monthly")))),
+        /* @__PURE__ */ React.createElement("div", { className: "ob-field" }, /* @__PURE__ */ React.createElement("label", null, "Next payday", /* @__PURE__ */ React.createElement("span", { className: "f-sub" }, "Powers “days until payday” on Home.")), /* @__PURE__ */ React.createElement("input", { type: "date", value: payDate, onChange: (e) => setPayDate(e.target.value) }), /* @__PURE__ */ React.createElement("select", { value: sched, onChange: (e) => setSched(e.target.value), style: { marginTop: 8 } }, /* @__PURE__ */ React.createElement("option", { value: "weekly" }, "Weekly"), /* @__PURE__ */ React.createElement("option", { value: "biweekly" }, "Every 2 weeks"), /* @__PURE__ */ React.createElement("option", { value: "semimonthly" }, "Twice a month"), /* @__PURE__ */ React.createElement("option", { value: "monthly" }, "Monthly"))),
+        /* @__PURE__ */ React.createElement("div", { className: "ob-field" }, /* @__PURE__ */ React.createElement("label", null, "Paycheck amount", /* @__PURE__ */ React.createElement("span", { className: "f-sub" }, "Take-home per check — makes your first answers real.")), /* @__PURE__ */ React.createElement("input", { type: "number", inputMode: "decimal", placeholder: "$  e.g. 1,500", value: payAmt, onChange: (e) => setPayAmt(e.target.value) }))),
       /* @__PURE__ */ React.createElement("div", { className: "ob-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: () => setStep(4) }, tr("btn_continue")), back));
   } else {
     const hasBank = (settings.bankLinks || []).length > 0;
@@ -4422,16 +4488,22 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
   // still never sees it at rest.
   useEffect(() => {
     const NAMES = { userSecret: "stash.relay.userSecret", vaultKey: "stash.relay.vaultKey" };
+    const lockOn = !!(settings.lock && settings.lock.enabled);
     const stored = settings.relayKeys || {};
     const next = { ...stored };
     let changed = false;
     Object.keys(NAMES).forEach((k) => {
-      const ls = localStorage.getItem(NAMES[k]);
+      let ls = null; try { ls = localStorage.getItem(NAMES[k]); } catch (e) {}
       if (ls && !stored[k]) { next[k] = ls; changed = true; }              // back up a newly-minted local key
-      else if (!ls && stored[k]) { try { localStorage.setItem(NAMES[k], stored[k]); } catch (e) {} } // restore onto a fresh device
     });
+    // Custody: install the keys into the provider's MEMORY. With the lock ON
+    // this also purges the plaintext localStorage copies — the PIN-encrypted
+    // settings.relayKeys becomes the only durable copy (runs post-unlock, so
+    // the keys are always available here). Without a lock, behavior is
+    // unchanged (localStorage restore for fresh devices).
+    if (window.__stashInstallRelayKeys) window.__stashInstallRelayKeys(changed ? next : stored, lockOn);
     if (changed) setSetting("relayKeys", next);
-  }, [settings.relayKeys, settings.bankLinks]);
+  }, [settings.relayKeys, settings.bankLinks, settings.lock && settings.lock.enabled]);
   // Reconcile connections against the relay: the server (KV) is the source of
   // truth for which relay banks are linked. On load we rebuild the simplefin/
   // plaid cards to exactly match the server list — ADDS ones missing locally
@@ -4442,7 +4514,7 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
   // response (errors leave cards as-is).
   useEffect(() => {
     const P = window.BankProviderRelay;
-    if (!P || !localStorage.getItem("stash.relay.userSecret")) return;
+    if (!P || !(window.__stashHasRelayId && window.__stashHasRelayId())) return;
     let live = true;
     P.listAccounts().then((conns) => {
       if (!live || !Array.isArray(conns)) return;
@@ -5133,6 +5205,7 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     txns,
     income,
     settings,
+    sfMap: data.sfMap || {},
     sinkingFunds,
     month: effMonth,
     setMonth,
@@ -5494,7 +5567,14 @@ function SimpleHome(p) {
       onClick: () => p.setTab("settings")
     },
     "Set your balance in Settings \u2192"
-  )), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "Left over \xB7 ", monthLabel(month)), /* @__PURE__ */ React.createElement("div", { className: "jarhero" }, /* @__PURE__ */ React.createElement(AnimatedFmt0, { cents: monthNet, className: "bank-val" + (monthNet < 0 ? " overspent" : "") }), /* @__PURE__ */ React.createElement(Jar, { level: leftLevel, size: 30, tint: monthNet < 0 ? "var(--crit)" : void 0, tid: "left" })), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, fmt0(monthIncomeC), " in \xB7 ", fmt0(outC), " out", savedMTD > 0 ? " \xB7 " + fmt0(savedMTD) + " saved" : ""), perDay != null && /* @__PURE__ */ React.createElement("div", { className: "perday" }, "\u2248 ", money(perDay), "/day \xB7 ", daysLeft, "d left")), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "On pace \xB7 ", monthLabel(month)), projectedEnd != null ? /* @__PURE__ */ React.createElement(AnimatedFmt0, { cents: projectedEnd, plus: true, className: "bank-val" + (projectedEnd < 0 ? " overspent" : "") }) : /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "bank-val", style: { opacity: 0.5 } }, "\u2014"), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, "a few days of spending and this shows where ", monthLabel(month), " is headed")))), /* @__PURE__ */ React.createElement("section", { className: "card center ask-card" + (v ? " open" : "") }, /* @__PURE__ */ React.createElement("div", { className: "eyebrow ask-title" }, /* @__PURE__ */ React.createElement(FlipWord, { verdict: v && v.verdict }), /* @__PURE__ */ React.createElement("button", { className: "info-i", "aria-label": "How this works", onClick: () => setHelpOpen(!helpOpen) }, "i")), helpOpen && /* @__PURE__ */ React.createElement("div", { className: "ask-help" }, "Type a price and pick its category — needs get more slack than fun. In My Stash checks it against your bank and goals, then answers."), /* @__PURE__ */ React.createElement("div", { className: "ask-wrap", onClick: () => { if (askRef.current) askRef.current.focus(); } }, /* @__PURE__ */ React.createElement("span", { className: "ask-ghost" }, "$", amt ? "" : "0"), /* @__PURE__ */ React.createElement("input", {
+  )), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "Left over \xB7 ", monthLabel(month)), /* @__PURE__ */ React.createElement("div", { className: "jarhero" }, /* @__PURE__ */ React.createElement(AnimatedFmt0, { cents: monthNet, className: "bank-val" + (monthNet < 0 ? " overspent" : "") }), /* @__PURE__ */ React.createElement(Jar, { level: leftLevel, size: 30, tint: monthNet < 0 ? "var(--crit)" : void 0, tid: "left" })), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, fmt0(monthIncomeC), " in \xB7 ", fmt0(outC), " out", savedMTD > 0 ? " \xB7 " + fmt0(savedMTD) + " saved" : ""), perDay != null && /* @__PURE__ */ React.createElement("div", { className: "perday" }, "\u2248 ", money(perDay), "/day \xB7 ", daysLeft, "d left")), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "On pace \xB7 ", monthLabel(month)), projectedEnd != null ? /* @__PURE__ */ React.createElement(AnimatedFmt0, { cents: projectedEnd, plus: true, className: "bank-val" + (projectedEnd < 0 ? " overspent" : "") }) : /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "bank-val", style: { opacity: 0.5 } }, "\u2014"), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, "a few days of spending and this shows where ", monthLabel(month), " is headed")))), nextPay && untilPay != null && /* @__PURE__ */ React.createElement("section", { className: "card paypocket", "aria-label": "Spendable until payday" },
+    /* @__PURE__ */ React.createElement("div", null,
+      /* @__PURE__ */ React.createElement("div", { className: "pp-val" }, money(untilPay)),
+      /* @__PURE__ */ React.createElement("div", { className: "pp-cap" }, "to spend before payday", perDayToPay != null && daysToPay > 0 ? " · ≈" + money(perDayToPay) + "/day" : "")),
+    /* @__PURE__ */ React.createElement("div", { className: "pp-days" }, daysToPay > 0
+      ? [/* @__PURE__ */ React.createElement("div", { key: "d", className: "pp-d" }, daysToPay), /* @__PURE__ */ React.createElement("div", { key: "l", className: "pp-dl" }, daysToPay === 1 ? "day" : "days")]
+      : /* @__PURE__ */ React.createElement("div", { className: "pp-d" }, "today"))),
+  /* @__PURE__ */ React.createElement("section", { className: "card center ask-card" + (v ? " open" : "") }, /* @__PURE__ */ React.createElement("div", { className: "eyebrow ask-title" }, /* @__PURE__ */ React.createElement(FlipWord, { verdict: v && v.verdict }), /* @__PURE__ */ React.createElement("button", { className: "info-i", "aria-label": "How this works", onClick: () => setHelpOpen(!helpOpen) }, "i")), helpOpen && /* @__PURE__ */ React.createElement("div", { className: "ask-help" }, "Type a price and pick its category — needs get more slack than fun. In My Stash checks it against your bank and goals, then answers."), /* @__PURE__ */ React.createElement("div", { className: "ask-wrap", onClick: () => { if (askRef.current) askRef.current.focus(); } }, /* @__PURE__ */ React.createElement("span", { className: "ask-ghost" }, "$", amt ? "" : "0"), /* @__PURE__ */ React.createElement("input", {
     ref: askRef,
     className: "ask-input",
     type: "text",
@@ -5510,7 +5590,7 @@ function SimpleHome(p) {
     onKeyDown: (e) => { if (e.key === "Enter") e.target.blur(); },
     onFocus: () => setAskFocus(true),
     onBlur: () => setTimeout(() => setAskFocus(false), 150)
-  }), /* @__PURE__ */ React.createElement("span", { className: "ask-ghost" + (amt.indexOf(".") !== -1 ? " faded" : "") }, amt.indexOf(".") === -1 ? ".00" : "00".slice(amt.length - amt.indexOf(".") - 1))), nextPay && untilPay != null && /* @__PURE__ */ React.createElement("div", { className: "til-pay" }, /* @__PURE__ */ React.createElement("b", null, money(untilPay)), " to spend before payday", daysToPay > 0 ? " · " + daysToPay + (daysToPay === 1 ? " day" : " days") : " · today", perDayToPay != null && daysToPay > 0 ? /* @__PURE__ */ React.createElement("span", { className: "til-day" }, " · ≈", money(perDayToPay), "/day") : null), askFocus && !amt && /* @__PURE__ */ React.createElement("div", { className: "quickrow" }, [500, 2000, 5000, 10000].map((q) => /* @__PURE__ */ React.createElement("button", { key: q, type: "button", className: "quickamt", onPointerDown: () => setAmt(String(q / 100)), onClick: () => setAmt(String(q / 100)) }, "$", q / 100))), cents != null && cents > 0 && /* @__PURE__ */ React.createElement("div", { className: "buckets" }, buckets.map((b) => /* @__PURE__ */ React.createElement(
+  }), /* @__PURE__ */ React.createElement("span", { className: "ask-ghost" + (amt.indexOf(".") !== -1 ? " faded" : "") }, amt.indexOf(".") === -1 ? ".00" : "00".slice(amt.length - amt.indexOf(".") - 1))), askFocus && !amt && /* @__PURE__ */ React.createElement("div", { className: "quickrow" }, [500, 2000, 5000, 10000].map((q) => /* @__PURE__ */ React.createElement("button", { key: q, type: "button", className: "quickamt", onPointerDown: () => setAmt(String(q / 100)), onClick: () => setAmt(String(q / 100)) }, "$", q / 100))), cents != null && cents > 0 && /* @__PURE__ */ React.createElement("div", { className: "buckets" }, buckets.map((b) => /* @__PURE__ */ React.createElement(
     "button",
     {
       key: b.id,
@@ -5775,7 +5855,7 @@ function Activity(p) {
   const saveList = txns.filter((t) => (showAll || C.monthOf(t.date) === month) && savingIds[t.categoryId] && matchTx(t)).slice().sort(sortFn);
   const incomeList = income.filter((e) => (showAll || C.monthOf(e.date) === month) && matchIn(e)).slice().sort(sortFn);
   const uncatFirst = spendList;
-  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h2", { className: "screen-title" }, "Activity"), billPrompt && /* @__PURE__ */ React.createElement("div", { className: "billprompt-scrim", onClick: () => setBillPrompt(null) }, /* @__PURE__ */ React.createElement("div", { className: "billprompt-bubble", role: "dialog", "aria-modal": "true", "aria-label": "Is this a recurring bill?", onClick: (e) => e.stopPropagation() }, /* @__PURE__ */ React.createElement("div", { className: "bt-msg" }, "Is “", billPrompt.merchant, "” a recurring bill?"), /* @__PURE__ */ React.createElement("div", { className: "bt-row" }, /* @__PURE__ */ React.createElement("label", { className: "bt-day" }, "Comes out day ", /* @__PURE__ */ React.createElement("input", { type: "number", min: 1, max: 31, value: billPrompt.day, onChange: (e) => setBillPrompt({ ...billPrompt, day: Math.max(1, Math.min(31, +e.target.value || 1)) }) })), /* @__PURE__ */ React.createElement("div", { className: "bt-btns" }, /* @__PURE__ */ React.createElement("button", { className: "btn quiet", onClick: () => setBillPrompt(null) }, "One-time"), /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: addRecurringBill }, "Every month"))), /* @__PURE__ */ React.createElement("div", { className: "bt-sub" }, money(billPrompt.amount), " · held back every month until you remove it in Settings → Recurring & upcoming"))), /* @__PURE__ */ React.createElement(Swiper, { labels: ["In the bank", "Saved up", "Safety net"] }, /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "In the bank"), p.availableNow != null ? /* @__PURE__ */ React.createElement(AnimatedMoneySplit, { cents: p.availableNow, className: "bank-val" + (p.availableNow < 0 ? " overspent" : "") }) : /* @__PURE__ */ React.createElement("div", { className: "bank-val", style: { opacity: 0.5 } }, "\u2014"), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, (p.settings.paycheck || {}).amount > 0 ? money(p.settings.paycheck.amount) + " per paycheck \u00b7 " + fmt0(monthSpendC) + " out \u00b7 " + monthLabel(month) : fmt0(monthIncomeC) + " in \u00b7 " + fmt0(monthSpendC) + " out \u00b7 " + monthLabel(month))), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "Saved up"), /* @__PURE__ */ React.createElement(AnimatedFmt0, { className: "bank-val", cents: p.savedTotal }), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, "Chime Savings + Fidelity")), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "Safety net"), /* @__PURE__ */ React.createElement("div", { className: "bank-val" }, p.runway === Infinity ? "\u2014" : p.runway.toFixed(1) + " mo"), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, "if income stopped"))), /* @__PURE__ */ React.createElement("div", { className: "seg", role: "group", "aria-label": "Filter activity" }, /* @__PURE__ */ React.createElement("button", { className: view === "spend" ? "on" : "", "aria-pressed": view === "spend", onClick: () => setView("spend") }, "Spending"), /* @__PURE__ */ React.createElement("button", { className: view === "income" ? "on" : "", "aria-pressed": view === "income", onClick: () => setView("income") }, "Income"), /* @__PURE__ */ React.createElement("button", { className: view === "save" ? "on" : "", "aria-pressed": view === "save", onClick: () => setView("save") }, "Savings")), /* @__PURE__ */ React.createElement("div", { className: "actbar" }, /* @__PURE__ */ React.createElement("select", { className: "actsort actmonth", value: showAll ? "all" : month, onChange: (e) => { const v = e.target.value; if (v === "all") setShowAll(true); else { setShowAll(false); setMonth(v); } }, "aria-label": "Filter by month" }, /* @__PURE__ */ React.createElement("option", { value: "all" }, "All months"), monthOptions.map((m) => /* @__PURE__ */ React.createElement("option", { key: m, value: m }, monthLabel(m)))), /* @__PURE__ */ React.createElement("input", { className: "actsearch", type: "search", inputMode: "search", placeholder: "\u{1F50D} Search", value: q, onChange: (e) => setQ(e.target.value) }), /* @__PURE__ */ React.createElement("select", { className: "actsort", value: sortBy, onChange: (e) => setSortBy(e.target.value), "aria-label": "Sort" }, /* @__PURE__ */ React.createElement("option", { value: "date" }, "Newest"), /* @__PURE__ */ React.createElement("option", { value: "amount" }, "Amount \u2193"))), view === "spend" && (() => {
+  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h2", { className: "screen-title" }, "Activity"), billPrompt && /* @__PURE__ */ React.createElement("div", { className: "billprompt-bubble billprompt-inline", role: "group", "aria-label": "Is this a recurring bill?" }, /* @__PURE__ */ React.createElement("div", { className: "bt-msg" }, "Is “", billPrompt.merchant, "” a recurring bill?"), /* @__PURE__ */ React.createElement("div", { className: "bt-row" }, /* @__PURE__ */ React.createElement("label", { className: "bt-day" }, "Comes out day ", /* @__PURE__ */ React.createElement("input", { type: "number", min: 1, max: 31, value: billPrompt.day, onChange: (e) => setBillPrompt({ ...billPrompt, day: Math.max(1, Math.min(31, +e.target.value || 1)) }) })), /* @__PURE__ */ React.createElement("div", { className: "bt-btns" }, /* @__PURE__ */ React.createElement("button", { className: "btn quiet", onClick: () => setBillPrompt(null) }, "One-time"), /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: addRecurringBill }, "Every month"))), /* @__PURE__ */ React.createElement("div", { className: "bt-sub" }, money(billPrompt.amount), " · held back every month until you remove it in Settings → Recurring & upcoming")), /* @__PURE__ */ React.createElement(Swiper, { labels: ["In the bank", "Saved up", "Safety net"] }, /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "In the bank"), p.availableNow != null ? /* @__PURE__ */ React.createElement(AnimatedMoneySplit, { cents: p.availableNow, className: "bank-val" + (p.availableNow < 0 ? " overspent" : "") }) : /* @__PURE__ */ React.createElement("div", { className: "bank-val", style: { opacity: 0.5 } }, "\u2014"), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, (p.settings.paycheck || {}).amount > 0 ? money(p.settings.paycheck.amount) + " per paycheck \u00b7 " + fmt0(monthSpendC) + " out \u00b7 " + monthLabel(month) : fmt0(monthIncomeC) + " in \u00b7 " + fmt0(monthSpendC) + " out \u00b7 " + monthLabel(month))), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "Saved up"), /* @__PURE__ */ React.createElement(AnimatedFmt0, { className: "bank-val", cents: p.savedTotal }), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, (function(){ var names = Object.keys(p.sfMap || {}).filter(function(a){ return (p.sfMap || {})[a] === "save"; }); return names.length ? names.join(" + ") : "your savings, all in one place"; })())), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "Safety net"), /* @__PURE__ */ React.createElement("div", { className: "bank-val" }, p.runway === Infinity ? "\u2014" : p.runway.toFixed(1) + " mo"), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, "if income stopped"))), /* @__PURE__ */ React.createElement("div", { className: "seg", role: "group", "aria-label": "Filter activity" }, /* @__PURE__ */ React.createElement("button", { className: view === "spend" ? "on" : "", "aria-pressed": view === "spend", onClick: () => setView("spend") }, "Spending"), /* @__PURE__ */ React.createElement("button", { className: view === "income" ? "on" : "", "aria-pressed": view === "income", onClick: () => setView("income") }, "Income"), /* @__PURE__ */ React.createElement("button", { className: view === "save" ? "on" : "", "aria-pressed": view === "save", onClick: () => setView("save") }, "Savings")), /* @__PURE__ */ React.createElement("div", { className: "actbar" }, /* @__PURE__ */ React.createElement("select", { className: "actsort actmonth", value: showAll ? "all" : month, onChange: (e) => { const v = e.target.value; if (v === "all") setShowAll(true); else { setShowAll(false); setMonth(v); } }, "aria-label": "Filter by month" }, /* @__PURE__ */ React.createElement("option", { value: "all" }, "All months"), monthOptions.map((m) => /* @__PURE__ */ React.createElement("option", { key: m, value: m }, monthLabel(m)))), /* @__PURE__ */ React.createElement("input", { className: "actsearch", type: "search", inputMode: "search", placeholder: "\u{1F50D} Search", value: q, onChange: (e) => setQ(e.target.value) }), /* @__PURE__ */ React.createElement("select", { className: "actsort", value: sortBy, onChange: (e) => setSortBy(e.target.value), "aria-label": "Sort" }, /* @__PURE__ */ React.createElement("option", { value: "date" }, "Newest"), /* @__PURE__ */ React.createElement("option", { value: "amount" }, "Amount \u2193"))), view === "spend" && (() => {
     const isBill = (t) => String(t.id || "").startsWith("recbill");
     const billRows = uncatFirst.filter(isBill);
     const manualRows = uncatFirst.filter((t) => !isBill(t));
@@ -6252,7 +6332,7 @@ function Settings(p) {
         }
       }
     ))
-  ), /* @__PURE__ */ React.createElement(Acc, { title: tr("set_banks"), cap: (settings.bankLinks || []).length ? ((settings.bankLinks.length) + " bank" + (settings.bankLinks.length === 1 ? "" : "s")) : tr("set_banks_none") }, /* @__PURE__ */ React.createElement("div", { className: "sub", style: { marginTop: 0, marginBottom: 12 } }, "Read-only connections. In My Stash can see balances and transactions — it can never move your money, and your data stays encrypted on this device."), syncCfg && syncCfg.enabled && /* @__PURE__ */ React.createElement("div", { className: "hint", style: { marginTop: 0, marginBottom: 12 } }, "Adding or removing a bank takes effect on this device right away. Your other devices catch up at the next sync — not instantly."), /* @__PURE__ */ React.createElement("div", { className: "bank-src" }, /* @__PURE__ */ React.createElement("span", null, "Connection source"), /* @__PURE__ */ React.createElement("select", { value: settings.bankProviderMode === "relay" || settings.bankProviderMode === "plaid" ? settings.bankProviderMode : "mock", onChange: (e) => setSetting("bankProviderMode", e.target.value), "aria-label": "Bank connection source" }, /* @__PURE__ */ React.createElement("option", { value: "mock" }, "Demo (simulated)"), /* @__PURE__ */ React.createElement("option", { value: "plaid" }, "Live · Plaid (tap & log in)"), /* @__PURE__ */ React.createElement("option", { value: "relay" }, "Live · SimpleFIN (paste token)"))), /* @__PURE__ */ React.createElement(BankConnect, { settings, setSetting, disconnectBank })), /* @__PURE__ */ React.createElement(Acc, { title: "Recurring & upcoming", cap: (settings.commitments || []).length ? (settings.commitments.length + " item" + (settings.commitments.length === 1 ? "" : "s")) : "auto" }, /* @__PURE__ */ React.createElement(CommitmentsSetup, { settings, setSetting })), /* @__PURE__ */ React.createElement(Acc, { title: "App & data", cap: syncCfg && syncCfg.enabled ? "sync on" : "sync off" }, /* @__PURE__ */ React.createElement("div", { className: "lock-row", style: { marginTop: 0, marginBottom: 10 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 16, fontWeight: 700, letterSpacing: "-.01em", color: "var(--ink)" } }, tr("set_language")), /* @__PURE__ */ React.createElement("select", { value: settings.lang || "system", onChange: (e) => setSetting("lang", e.target.value), "aria-label": tr("set_language") }, /* @__PURE__ */ React.createElement("option", { value: "system" }, tr("set_language_system")), Object.keys(LANG_NAMES).map((code) => /* @__PURE__ */ React.createElement("option", { key: code, value: code }, LANG_NAMES[code])))), /* @__PURE__ */ React.createElement("div", { className: "lock-row", style: { marginTop: 0, marginBottom: 10 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 16, fontWeight: 700, letterSpacing: "-.01em", color: "var(--ink)" } }, "Text size"), /* @__PURE__ */ React.createElement("select", { value: String(settings.uiScale || 1), onChange: (e) => setSetting("uiScale", +e.target.value), "aria-label": "Text size" }, /* @__PURE__ */ React.createElement("option", { value: "1" }, "Default"), /* @__PURE__ */ React.createElement("option", { value: "1.15" }, "Large"), /* @__PURE__ */ React.createElement("option", { value: "1.3" }, "Largest"))), /* @__PURE__ */ React.createElement(
+  ), /* @__PURE__ */ React.createElement(Acc, { title: tr("set_banks"), cap: (settings.bankLinks || []).length ? ((settings.bankLinks.length) + " bank" + (settings.bankLinks.length === 1 ? "" : "s")) : tr("set_banks_none") }, /* @__PURE__ */ React.createElement("div", { className: "sub", style: { marginTop: 0, marginBottom: 12 } }, "Read-only connections. In My Stash can see balances and transactions — it can never move your money, and your data stays encrypted on this device."), syncCfg && syncCfg.enabled && /* @__PURE__ */ React.createElement("div", { className: "hint", style: { marginTop: 0, marginBottom: 12 } }, "Adding or removing a bank takes effect on this device right away. Your other devices catch up at the next sync — not instantly."), /* @__PURE__ */ React.createElement("div", { className: "bank-src" }, /* @__PURE__ */ React.createElement("span", null, "Connection source"), /* @__PURE__ */ React.createElement("select", { value: settings.bankProviderMode === "relay" || settings.bankProviderMode === "mock" ? settings.bankProviderMode : "plaid", onChange: (e) => setSetting("bankProviderMode", e.target.value), "aria-label": "Bank connection source" }, /* @__PURE__ */ React.createElement("option", { value: "plaid" }, "Plaid (tap & log in)"), /* @__PURE__ */ React.createElement("option", { value: "relay" }, "SimpleFIN (paste token)"), /* @__PURE__ */ React.createElement("option", { value: "mock" }, "Demo (simulated — not real)"))), /* @__PURE__ */ React.createElement(BankConnect, { settings, setSetting, disconnectBank })), /* @__PURE__ */ React.createElement(Acc, { title: "Recurring & upcoming", cap: (settings.commitments || []).length ? (settings.commitments.length + " item" + (settings.commitments.length === 1 ? "" : "s")) : "auto" }, /* @__PURE__ */ React.createElement(CommitmentsSetup, { settings, setSetting })), /* @__PURE__ */ React.createElement(Acc, { title: "App & data", cap: syncCfg && syncCfg.enabled ? "sync on" : "sync off" }, /* @__PURE__ */ React.createElement("div", { className: "lock-row", style: { marginTop: 0, marginBottom: 10 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 16, fontWeight: 700, letterSpacing: "-.01em", color: "var(--ink)" } }, tr("set_language")), /* @__PURE__ */ React.createElement("select", { value: settings.lang || "system", onChange: (e) => setSetting("lang", e.target.value), "aria-label": tr("set_language") }, /* @__PURE__ */ React.createElement("option", { value: "system" }, tr("set_language_system")), Object.keys(LANG_NAMES).map((code) => /* @__PURE__ */ React.createElement("option", { key: code, value: code }, LANG_NAMES[code])))), /* @__PURE__ */ React.createElement("div", { className: "lock-row", style: { marginTop: 0, marginBottom: 10 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 16, fontWeight: 700, letterSpacing: "-.01em", color: "var(--ink)" } }, "Text size"), /* @__PURE__ */ React.createElement("select", { value: String(settings.uiScale || 1), onChange: (e) => setSetting("uiScale", +e.target.value), "aria-label": "Text size" }, /* @__PURE__ */ React.createElement("option", { value: "1" }, "Default"), /* @__PURE__ */ React.createElement("option", { value: "1.15" }, "Large"), /* @__PURE__ */ React.createElement("option", { value: "1.3" }, "Largest"))), /* @__PURE__ */ React.createElement(
     Acc,
     {
       title: "Sync across devices",
