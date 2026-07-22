@@ -5370,7 +5370,18 @@ function SimpleHome(p) {
     incStability = mean > 0 ? Math.max(0, Math.min(1, 1 - Math.sqrt(varc) / mean)) : 0.5;
   }
   const trajectory = monthNet > 0 ? 1 : monthNet < 0 ? -1 : 0;
-  const v = cents != null && cents > 0 && bucket ? C.simpleVerdict(cents, monthNet, projectedEnd, perDay, leniency, {
+  // Pay-period horizon: with a payday anchor and a real bank balance, the
+  // spend/stash decision asks "does this still leave me okay until my next
+  // paycheck?" — the spendable buffer (bank − floor) paced over days-to-payday —
+  // instead of the calendar month (whose "rest of month" collapses near the 31st
+  // and never matches biweekly checks). Falls back to the month when no payday
+  // or bank balance is set. simpleVerdict is horizon-agnostic; only inputs change.
+  const payHorizon = inProgress && !!(nextPay && daysToPay > 0 && untilPay != null);
+  const projectedAtPay = payHorizon && dayNum >= 3 ? C.projectMonthEnd(untilPay, variableSpendMTD, dayNum, dayNum + daysToPay) : null;
+  const vLeft = payHorizon ? untilPay : monthNet;
+  const vProjected = payHorizon ? projectedAtPay : projectedEnd;
+  const vPerDay = payHorizon ? perDayToPay : perDay;
+  const v = cents != null && cents > 0 && bucket ? C.simpleVerdict(cents, vLeft, vProjected, vPerDay, leniency, {
     bank: availableNow,
     floor: settings.balanceFloor || 0,
     reserved: reservedC,
@@ -5379,7 +5390,7 @@ function SimpleHome(p) {
     targetRunway: settings.targetRunway,
     stability: incStability,
     trajectory,
-    daysLeft: inProgress ? daysRemaining : null
+    daysLeft: payHorizon ? daysToPay : (inProgress ? daysRemaining : null)
   }) : null;
   const prevVerdict = useRef(null);
   useEffect(() => {
@@ -5389,6 +5400,8 @@ function SimpleHome(p) {
     }
     prevVerdict.current = cur;
   }, [v && v.verdict]);
+  const periodTail = payHorizon ? "until payday" : "this month";
+  const periodDaysN = payHorizon ? daysToPay : daysRemaining;
   const copy = v && {
     bank: {
       ic: "\u2715",
@@ -5410,37 +5423,41 @@ function SimpleHome(p) {
     dent: {
       ic: "\u25b3",
       head: tr("v_yourcall"),
-      sub: "It fits the month, but it drops your safety net below your " + settings.targetRunway + "-month goal."
+      sub: "It fits your budget, but it drops your safety net below your " + settings.targetRunway + "-month goal."
     },
     squeeze: {
-      ic: "\u25b3",
+      ic: "\u25B3",
       head: tr("v_yourcall"),
-      sub: "That leaves about " + money(v.perDayAfter || 0) + "/day for the last " + daysRemaining + " days of " + monthLabel(month) + "."
+      sub: "That leaves about " + money(v.perDayAfter || 0) + "/day for the " + periodDaysN + " days " + (payHorizon ? "until payday" : "left in " + monthLabel(month)) + "."
     },
     left: {
       ic: "\u2715",
       head: tr("v_stash"),
-      sub: "That's more than you have left \u2014 you'd be " + money(-v.leftAfter) + " past what came in this month."
+      sub: "That's more than you have left \u2014 you'd be " + money(-v.leftAfter) + " past " + (payHorizon ? "your buffer until payday" : "what came in this month") + "."
     },
     pace: {
       ic: "\u2715",
       head: tr("v_stash"),
-      sub: "It would tip the month red \u2014 at your pace you'd end " + monthLabel(month) + " around " + money(v.projAfter) + "."
+      sub: payHorizon
+        ? "It would tip you red \u2014 at your pace you'd hit payday around " + money(v.projAfter) + "."
+        : "It would tip the month red \u2014 at your pace you'd end " + monthLabel(month) + " around " + money(v.projAfter) + "."
     },
     mostleft: {
       ic: "\u25B3",
       head: tr("v_yourcall"),
-      sub: "It's most of what's left \u2014 only " + money(v.leftAfter) + " would remain for the rest of " + monthLabel(month) + "."
+      sub: "It's most of what's left \u2014 only " + money(v.leftAfter) + " would remain " + (payHorizon ? "until payday" : "for the rest of " + monthLabel(month)) + "."
     },
     trend: {
       ic: "\u25B3",
       head: tr("v_yourcall"),
-      sub: monthLabel(month) + " is already trending negative \u2014 around " + money(projectedEnd == null ? 0 : projectedEnd) + " before this."
+      sub: payHorizon
+        ? "You're already trending negative \u2014 on pace for around " + money(projectedAtPay == null ? 0 : projectedAtPay) + " at payday, before this."
+        : monthLabel(month) + " is already trending negative \u2014 around " + money(projectedEnd == null ? 0 : projectedEnd) + " before this."
     },
     bigday: {
       ic: "\u25B3",
       head: tr("v_yourcall"),
-      sub: "That's " + (perDay ? Math.round(cents / perDay) : 0) + " days of budget in one go \u2014 about " + money(perDay || 0) + "/day is left."
+      sub: "That's " + (vPerDay ? Math.round(cents / vPerDay) : 0) + " days of budget in one go \u2014 about " + money(vPerDay || 0) + "/day is left " + periodTail + "."
     },
     want: {
       ic: "\u25b3",
@@ -5455,7 +5472,7 @@ function SimpleHome(p) {
     ok: {
       ic: "\u2713",
       head: tr("v_spend"),
-      sub: (leniency > 1 && cents > (perDay || 0) * 3 ? "Essentials get some slack \u2014 you'd have " + money(v.leftAfter) + " left this month." : "You'd still have " + money(v.leftAfter) + " left this month.") + (leniency <= 1 && (settings.savingsGoal || 0) > 0 && savedTotal < settings.savingsGoal ? " Or stash it \u2014 " + money(cents) + " closer to your " + fmt0(settings.savingsGoal) + " goal." : "")
+      sub: (leniency > 1 && cents > (vPerDay || 0) * 3 ? "Essentials get some slack \u2014 you'd have " + money(v.leftAfter) + " left " + periodTail + "." : "You'd still have " + money(v.leftAfter) + " left " + periodTail + ".") + (leniency <= 1 && (settings.savingsGoal || 0) > 0 && savedTotal < settings.savingsGoal ? " Or stash it \u2014 " + money(cents) + " closer to your " + fmt0(settings.savingsGoal) + " goal." : "")
     }
   }[v.reason];
   const buckets = C.SPEND_BUCKETS;
