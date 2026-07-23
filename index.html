@@ -4777,8 +4777,9 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     importInbox(inboxNew.map((r) => {
       const pfc = String(r.pfc || "");
       const xferPfc = /^(TRANSFER_IN|TRANSFER_OUT|LOAN_PAYMENTS)/.test(pfc);
-      const xferLabel = (r.kind === "spend" && /\b(transfer|xfer|to savings|to checking|internal transfer|wire transfer|fidelity|vanguard|robinhood|coinbase)\b/i.test(r.label || ""))
-        || (r.kind === "income" && /\b(transfer|xfer)\b/i.test(r.label || ""));
+      const xv = (data.xferMap || {})[normXfer(r.label)];
+      const xferLabel = xv ? xv === "transfer" : ((r.kind === "spend" && /\b(transfer|xfer|to savings|to checking|internal transfer|wire transfer|fidelity|vanguard|robinhood|coinbase)\b/i.test(r.label || ""))
+        || (r.kind === "income" && /\b(transfer|xfer)\b/i.test(r.label || "")));
       const kind = (xferPfc || xferLabel) ? "transfer" : r.kind;
       const cat = kind === "spend" && R ? (R.guessCategory(r.label, categories, merchantMap) || (categories.some((c) => c.id === PFC_CAT[pfc]) ? PFC_CAT[pfc] : "") || "") : "";
       return { ...r, kind, categoryId: cat };
@@ -5026,15 +5027,18 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     // imported (savings accounts are balance-only) and so can't be paired.
     const IN_XFER = /\b(transfer|xfer)\b/i;
     const OUT_XFER = /\b(transfer|xfer|to savings|to checking|internal transfer|wire transfer|fidelity|vanguard|robinhood|coinbase)\b/i;
-    inc.forEach((e) => { if (e && e.account && !e.isTransfer && IN_XFER.test(e.source || "")) markI[e.id] = 1; });
-    txs.forEach((t) => { if (t && t.account && !t.isTransfer && OUT_XFER.test(t.merchant || "")) markT[t.id] = 1; });
+    // The user's learned classifications (xferMap) and per-row pins
+    // (xferExempt) beat the regexes in BOTH directions.
+    const XM = data.xferMap || {};
+    inc.forEach((e) => { if (e && e.account && !e.isTransfer && !e.xferExempt && XM[normXfer(e.source)] !== "keep" && (XM[normXfer(e.source)] === "transfer" || IN_XFER.test(e.source || ""))) markI[e.id] = 1; });
+    txs.forEach((t) => { if (t && t.account && !t.isTransfer && !t.xferExempt && XM[normXfer(t.merchant)] !== "keep" && (XM[normXfer(t.merchant)] === "transfer" || OUT_XFER.test(t.merchant || ""))) markT[t.id] = 1; });
     // (b) pairing pass — a deposit matching a withdrawal from a DIFFERENT
     // account (same amount, within 3 days) is a move between two imported
     // accounts; both sides marked.
     inc.forEach((e) => {
-      if (!e || !e.account || e.isTransfer || markI[e.id] || !e.date) return;
+      if (!e || !e.account || e.isTransfer || e.xferExempt || markI[e.id] || !e.date) return;
       const eTime = new Date(e.date + "T12:00").getTime();
-      const m = txs.find((t) => t && t.account && t.account !== e.account && !t.isTransfer && !markT[t.id] && t.amount === e.amount && t.amount > 0 && t.date && Math.abs(new Date(t.date + "T12:00").getTime() - eTime) <= 3 * 864e5);
+      const m = txs.find((t) => t && t.account && t.account !== e.account && !t.isTransfer && !t.xferExempt && !markT[t.id] && t.amount === e.amount && t.amount > 0 && t.date && Math.abs(new Date(t.date + "T12:00").getTime() - eTime) <= 3 * 864e5);
       if (m) { markT[m.id] = 1; markI[e.id] = 1; }
     });
     if (!Object.keys(markT).length && !Object.keys(markI).length) return;
@@ -5043,7 +5047,7 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
       txns: d.txns.map((t) => markT[t.id] ? { ...t, isTransfer: 1, categoryId: null } : t),
       income: d.income.map((e) => markI[e.id] ? { ...e, isTransfer: 1 } : e)
     }));
-  }, [data.txns, data.income, setData]);
+  }, [data.txns, data.income, data.xferMap, setData]);
   // Ask-log reconciliation: a purchase logged from the verdict ("Log it")
   // arrives AGAIN through the bank feed days later, double-counting it. When
   // a bank-tagged twin shows up (same amount, within 4 days), the bank row is
@@ -5309,6 +5313,34 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
       }
     }));
   };
+  // Reclassify a deposit/withdrawal the transfer detector mis-sorted — and
+  // LEARN the label so every future import of that pattern lands right
+  // (bank label conventions vary too much for regexes alone; the user's word
+  // is authoritative). xferExempt pins the row so the detector never re-marks.
+  const reclassIncome = (id, asIncome) => {
+    buzz(8);
+    setData((d) => {
+      const e = (d.income || []).find((x) => x.id === id);
+      const key = e && normXfer(e.source);
+      return {
+        ...d,
+        income: (d.income || []).map((x) => x.id === id ? { ...x, isTransfer: asIncome ? 0 : 1, xferExempt: 1, _m: Date.now() } : x),
+        ...(key ? { xferMap: { ...(d.xferMap || {}), [key]: asIncome ? "keep" : "transfer" } } : {})
+      };
+    });
+  };
+  const reclassTxn = (id, asSpend) => {
+    buzz(8);
+    setData((d) => {
+      const t = (d.txns || []).find((x) => x.id === id);
+      const key = t && normXfer(t.merchant);
+      return {
+        ...d,
+        txns: (d.txns || []).map((x) => x.id === id ? { ...x, isTransfer: asSpend ? 0 : 1, xferExempt: 1, ...(asSpend && x.categoryId == null ? { categoryId: "gen" } : {}), _m: Date.now() } : x),
+        ...(key ? { xferMap: { ...(d.xferMap || {}), [key]: asSpend ? "keep" : "transfer" } } : {})
+      };
+    });
+  };
   const restoreUndo = () => {
     const u = undoItem;
     setUndoItem(null);
@@ -5481,7 +5513,7 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     {
       ...shared,
       simpleMode,
-      ...{ deleteTxn, deleteIncome, updateTxn, updateIncome, monthIncomeC, monthSpendC, savingsFeed, setSetting },
+      ...{ deleteTxn, deleteIncome, updateTxn, updateIncome, reclassIncome, reclassTxn, monthIncomeC, monthSpendC, savingsFeed, setSetting },
       view: actView,
       setView: setActView,
       openAdd: () => setSheetOpen(true)
@@ -6055,6 +6087,10 @@ function DeleteX({ onDelete }) {
     onDelete();
   } }, "\xD7");
 }
+// Label normalizer for the transfer-classification map: lowercase, strip
+// digits/punctuation, collapse spaces — "Transfer from Savings ****1234" and
+// "TRANSFER FROM SAVINGS 5678" learn as the same pattern.
+const normXfer = (s) => String(s || "").toLowerCase().replace(/[^a-z ]+/g, " ").replace(/\s+/g, " ").trim();
 function Activity(p) {
   const {
     txns,
@@ -6067,6 +6103,8 @@ function Activity(p) {
     deleteIncome,
     updateTxn,
     updateIncome,
+    reclassIncome,
+    reclassTxn,
     monthIncomeC,
     monthSpendC,
     view,
@@ -6102,9 +6140,23 @@ function Activity(p) {
   const sortFn = sortBy === "amount"
     ? (a, b) => Math.abs(b.amount) - Math.abs(a.amount)
     : (a, b) => a.date < b.date ? 1 : a.date > b.date ? -1 : 0;
-  const spendList = txns.filter((t) => (showAll || C.monthOf(t.date) === month) && !savingIds[t.categoryId] && matchTx(t)).slice().sort(sortFn);
-  const saveList = txns.filter((t) => (showAll || C.monthOf(t.date) === month) && savingIds[t.categoryId] && matchTx(t)).slice().sort(sortFn);
+  const spendList = txns.filter((t) => !t.isTransfer && (showAll || C.monthOf(t.date) === month) && !savingIds[t.categoryId] && matchTx(t)).slice().sort(sortFn);
+  const saveList = txns.filter((t) => !t.isTransfer && (showAll || C.monthOf(t.date) === month) && savingIds[t.categoryId] && matchTx(t)).slice().sort(sortFn);
   const incomeList = income.filter((e) => !e.isTransfer && (showAll || C.monthOf(e.date) === month) && matchIn(e)).slice().sort(sortFn);
+  // Rows the transfer detector excluded — shown so the user can audit and
+  // overrule with one tap ("Count it"); the label pattern is then learned.
+  const excludedSpend = txns.filter((t) => t.isTransfer && t.account && (showAll || C.monthOf(t.date) === month) && matchTx(t)).slice().sort(sortFn);
+  const excludedIncome = income.filter((e) => e.isTransfer && e.account && (showAll || C.monthOf(e.date) === month) && matchIn(e)).slice().sort(sortFn);
+  const xferRow = (r, isInc) => /* @__PURE__ */ React.createElement("div", { key: "x-" + r.id, className: "txrow", style: { opacity: 0.62 } },
+    /* @__PURE__ */ React.createElement("div", { className: "rowic" }, "⇄"),
+    /* @__PURE__ */ React.createElement("div", { className: "tx-main" },
+      /* @__PURE__ */ React.createElement("div", { className: "tx-merch" }, (isInc ? r.source : r.merchant) || "Transfer"),
+      /* @__PURE__ */ React.createElement("div", { className: "tx-date" }, monthShort(C.monthOf(r.date)), " ", +r.date.slice(8, 10), " · transfer, not counted")),
+    /* @__PURE__ */ React.createElement("span", { className: "tx-amt" }, isInc ? "+" : "", money(Math.abs(r.amount))),
+    /* @__PURE__ */ React.createElement("button", { className: "btn quiet", style: { padding: "4px 10px", fontSize: 12, flex: "none" }, onClick: () => isInc ? reclassIncome(r.id, true) : reclassTxn(r.id, true) }, "Count it"));
+  const xferHead = (list, label) => /* @__PURE__ */ React.createElement("div", { className: "planline", style: { marginTop: 12 } },
+    /* @__PURE__ */ React.createElement("span", { className: "pl-name" }, "⇄ ", label),
+    /* @__PURE__ */ React.createElement("span", { className: "pl-amt" }, fmt0(list.reduce((s, r) => s + Math.abs(r.amount), 0))));
   const uncatFirst = spendList;
   return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h2", { className: "screen-title" }, "Activity"), billPrompt && /* @__PURE__ */ React.createElement("div", { className: "billprompt-bubble billprompt-inline", role: "group", "aria-label": "Is this a recurring bill?" }, /* @__PURE__ */ React.createElement("div", { className: "bt-msg" }, "Is “", billPrompt.merchant, "” a recurring bill?"), /* @__PURE__ */ React.createElement("div", { className: "bt-row" }, /* @__PURE__ */ React.createElement("label", { className: "bt-day" }, "Comes out day ", /* @__PURE__ */ React.createElement("input", { type: "number", min: 1, max: 31, value: billPrompt.day, onChange: (e) => setBillPrompt({ ...billPrompt, day: Math.max(1, Math.min(31, +e.target.value || 1)) }) })), /* @__PURE__ */ React.createElement("div", { className: "bt-btns" }, /* @__PURE__ */ React.createElement("button", { className: "btn quiet", onClick: () => setBillPrompt(null) }, "One-time"), /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: addRecurringBill }, "Every month"))), /* @__PURE__ */ React.createElement("div", { className: "bt-sub" }, money(billPrompt.amount), " · held back every month until you remove it in Settings → Recurring & upcoming")), /* @__PURE__ */ React.createElement(Swiper, { labels: ["In the bank", "Saved up", "Safety net"] }, /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "In the bank"), p.availableNow != null ? /* @__PURE__ */ React.createElement(AnimatedMoneySplit, { cents: p.availableNow, className: "bank-val" + (p.availableNow < 0 ? " overspent" : "") }) : /* @__PURE__ */ React.createElement("div", { className: "bank-val", style: { opacity: 0.5 } }, "\u2014"), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, (p.settings.paycheck || {}).amount > 0 ? money(p.settings.paycheck.amount) + " per paycheck \u00b7 " + fmt0(monthSpendC) + " out \u00b7 " + monthLabel(month) : fmt0(monthIncomeC) + " in \u00b7 " + fmt0(monthSpendC) + " out \u00b7 " + monthLabel(month))), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "Saved up"), /* @__PURE__ */ React.createElement(AnimatedFmt0, { className: "bank-val", cents: p.savedTotal }), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, (function(){ var names = Object.keys(p.sfMap || {}).filter(function(a){ return (p.sfMap || {})[a] === "save"; }); return names.length ? names.join(" + ") : "your savings, all in one place"; })())), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "Safety net"), /* @__PURE__ */ React.createElement("div", { className: "bank-val" }, p.runway === Infinity ? "\u2014" : p.runway.toFixed(1) + " mo"), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, "if income stopped"))), /* @__PURE__ */ React.createElement("div", { className: "seg", role: "group", "aria-label": "Filter activity" }, /* @__PURE__ */ React.createElement("button", { className: view === "spend" ? "on" : "", "aria-pressed": view === "spend", onClick: () => setView("spend") }, "Spending"), /* @__PURE__ */ React.createElement("button", { className: view === "income" ? "on" : "", "aria-pressed": view === "income", onClick: () => setView("income") }, "Income"), /* @__PURE__ */ React.createElement("button", { className: view === "save" ? "on" : "", "aria-pressed": view === "save", onClick: () => setView("save") }, "Savings")), /* @__PURE__ */ React.createElement("div", { className: "actbar" }, /* @__PURE__ */ React.createElement("select", { className: "actsort actmonth", value: showAll ? "all" : month, onChange: (e) => { const v = e.target.value; if (v === "all") setShowAll(true); else { setShowAll(false); setMonth(v); } }, "aria-label": "Filter by month" }, /* @__PURE__ */ React.createElement("option", { value: "all" }, "All months"), monthOptions.map((m) => /* @__PURE__ */ React.createElement("option", { key: m, value: m }, monthLabel(m)))), /* @__PURE__ */ React.createElement("input", { className: "actsearch", type: "search", inputMode: "search", placeholder: "\u{1F50D} Search", value: q, onChange: (e) => setQ(e.target.value) }), /* @__PURE__ */ React.createElement("select", { className: "actsort", value: sortBy, onChange: (e) => setSortBy(e.target.value), "aria-label": "Sort" }, /* @__PURE__ */ React.createElement("option", { value: "date" }, "Newest"), /* @__PURE__ */ React.createElement("option", { value: "amount" }, "Amount \u2193"))), view === "spend" && (() => {
     const isBill = (t) => String(t.id || "").startsWith("recbill");
@@ -6120,17 +6172,20 @@ function Activity(p) {
           value: t.categoryId || "",
           onChange: (e) => {
             const cid = e.target.value;
+            if (cid === "__xfer") { reclassTxn(t.id, false); return; }
             recategorize(t.id, cid);
             if (cid === "bills" && Math.abs(t.amount) > 0) setBillPrompt({ txnId: t.id, merchant: t.merchant || "Bill", amount: Math.abs(t.amount), day: +t.date.slice(8, 10) || 1 });
           },
           "aria-label": "Category"
         },
-        opts
+        opts,
+        /* @__PURE__ */ React.createElement("option", { value: "__xfer" }, "⇄ Transfer — don't count")
       ));
     };
-    if (uncatFirst.length === 0) return /* @__PURE__ */ React.createElement("section", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "empty" }, /* @__PURE__ */ React.createElement("span", { className: "e-ic" }, "\u{1F9FE}"), "Nothing logged", showAll ? "" : " in " + monthLabel(month), " yet.", /* @__PURE__ */ React.createElement("br", null), "Tap + to add your first expense."));
-    return /* @__PURE__ */ React.createElement("section", { className: "card" }, uncatFirst.map(spendRow));
-  })(), view === "save" && /* @__PURE__ */ React.createElement(Acc, { title: "Savings", cap: fmt0(p.savedTotal) + " total", defaultOpen: true }, /* @__PURE__ */ React.createElement("div", { className: "planline" }, /* @__PURE__ */ React.createElement("span", { className: "pl-name" }, "In savings now"), /* @__PURE__ */ React.createElement("span", { className: "pl-amt" }, fmt0(p.savedTotal))), (p.savingsFeed || []).filter((r) => showAll || C.monthOf(r.date) === month).map((r) => /* @__PURE__ */ React.createElement("div", { key: "sfr-" + r.id, className: "txrow" }, /* @__PURE__ */ React.createElement("div", { className: "rowic" }, "↥"), /* @__PURE__ */ React.createElement("div", { className: "tx-main" }, /* @__PURE__ */ React.createElement("div", { className: "tx-merch" }, r.label), /* @__PURE__ */ React.createElement("div", { className: "tx-date" }, monthShort(C.monthOf(r.date)), " ", +r.date.slice(8, 10), " · from your bank")), /* @__PURE__ */ React.createElement("span", { className: "tx-amt refund" }, "+", money(r.cents)))), saveList.length === 0 && !(p.savingsFeed || []).some((r) => showAll || C.monthOf(r.date) === month) && /* @__PURE__ */ React.createElement("div", { className: "empty" }, /* @__PURE__ */ React.createElement("span", { className: "e-ic" }, "\u{1F9EF}"), "Nothing set aside", showAll ? "" : " in " + monthLabel(month), ".", /* @__PURE__ */ React.createElement("br", null), "Savings from Chime + Fidelity land here automatically \u2014 nothing to log."), saveList.map((t) => /* @__PURE__ */ React.createElement(SwipeRow, { key: t.id, onDelete: () => deleteTxn(t.id), className: "txrow" }, /* @__PURE__ */ React.createElement("div", { className: "rowic" }, "\u2605"),/* @__PURE__ */ React.createElement("div", { className: "tx-main" }, /* @__PURE__ */ React.createElement("div", { className: "tx-merch" }, t.merchant || "Savings"), /* @__PURE__ */ React.createElement("div", { className: "tx-date" }, monthShort(C.monthOf(t.date)), " ", +t.date.slice(8, 10), t.amount < 0 ? " \xB7 taken back out" : " \xB7 set aside")), /* @__PURE__ */ React.createElement("span", { className: "tx-amt" + (t.amount > 0 ? " refund" : "") }, t.amount > 0 ? "+" : "\u2212", money(Math.abs(t.amount))), /* @__PURE__ */ React.createElement(DeleteX, { onDelete: () => deleteTxn(t.id) })))), view === "income" && /* @__PURE__ */ React.createElement(Acc, { title: "Income", cap: incomeList.length + (incomeList.length === 1 ? " deposit · " : " deposits · ") + fmt0(incomeList.reduce((s, e) => s + e.amount, 0)), defaultOpen: true }, (p.settings.monthlyIncome || 0) > 0 && /* @__PURE__ */ React.createElement("div", { className: "planline" }, /* @__PURE__ */ React.createElement("span", { className: "pl-name" }, "Monthly plan income"), /* @__PURE__ */ React.createElement("span", { className: "pl-amt" }, fmt0(p.settings.monthlyIncome), /* @__PURE__ */ React.createElement("small", null, "/mo"))), incomeList.length === 0 && /* @__PURE__ */ React.createElement("div", { className: "empty" }, /* @__PURE__ */ React.createElement("span", { className: "e-ic" }, "\u{1F4B5}"), "No deposits logged", showAll ? "" : " in " + monthLabel(month), ".", /* @__PURE__ */ React.createElement("br", null), "Tap + to log cash you were paid \u2014 card deposits sync automatically."), incomeList.map((e) => /* @__PURE__ */ React.createElement(SwipeRow, { key: e.id, onDelete: () => deleteIncome(e.id), className: "txrow" }, /* @__PURE__ */ React.createElement("div", { className: "rowic" }, "\u2193"),/* @__PURE__ */ React.createElement("div", { className: "tx-main" }, /* @__PURE__ */ React.createElement("div", { className: "tx-merch" }, e.source || "Deposit"), /* @__PURE__ */ React.createElement("div", { className: "tx-date" }, monthShort(C.monthOf(e.date)), " ", +e.date.slice(8, 10))), /* @__PURE__ */ React.createElement("span", { className: "tx-amt refund" }, "+", money(e.amount)), /* @__PURE__ */ React.createElement(DeleteX, { onDelete: () => deleteIncome(e.id) })))), false);
+    const xferBlock = excludedSpend.length > 0 && [xferHead(excludedSpend, "Transfers (not spending)"), ...excludedSpend.map((t) => xferRow(t, false))];
+    if (uncatFirst.length === 0 && !excludedSpend.length) return /* @__PURE__ */ React.createElement("section", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "empty" }, /* @__PURE__ */ React.createElement("span", { className: "e-ic" }, "\u{1F9FE}"), "Nothing logged", showAll ? "" : " in " + monthLabel(month), " yet.", /* @__PURE__ */ React.createElement("br", null), "Tap + to add your first expense."));
+    return /* @__PURE__ */ React.createElement("section", { className: "card" }, uncatFirst.map(spendRow), xferBlock);
+  })(), view === "save" && /* @__PURE__ */ React.createElement(Acc, { title: "Savings", cap: fmt0(p.savedTotal) + " total", defaultOpen: true }, /* @__PURE__ */ React.createElement("div", { className: "planline" }, /* @__PURE__ */ React.createElement("span", { className: "pl-name" }, "In savings now"), /* @__PURE__ */ React.createElement("span", { className: "pl-amt" }, fmt0(p.savedTotal))), (p.savingsFeed || []).filter((r) => showAll || C.monthOf(r.date) === month).map((r) => /* @__PURE__ */ React.createElement("div", { key: "sfr-" + r.id, className: "txrow" }, /* @__PURE__ */ React.createElement("div", { className: "rowic" }, "↥"), /* @__PURE__ */ React.createElement("div", { className: "tx-main" }, /* @__PURE__ */ React.createElement("div", { className: "tx-merch" }, r.label), /* @__PURE__ */ React.createElement("div", { className: "tx-date" }, monthShort(C.monthOf(r.date)), " ", +r.date.slice(8, 10), " · from your bank")), /* @__PURE__ */ React.createElement("span", { className: "tx-amt refund" }, "+", money(r.cents)))), saveList.length === 0 && !(p.savingsFeed || []).some((r) => showAll || C.monthOf(r.date) === month) && /* @__PURE__ */ React.createElement("div", { className: "empty" }, /* @__PURE__ */ React.createElement("span", { className: "e-ic" }, "\u{1F9EF}"), "Nothing set aside", showAll ? "" : " in " + monthLabel(month), ".", /* @__PURE__ */ React.createElement("br", null), "Savings from your connected accounts land here automatically \u2014 nothing to log."), saveList.map((t) => /* @__PURE__ */ React.createElement(SwipeRow, { key: t.id, onDelete: () => deleteTxn(t.id), className: "txrow" }, /* @__PURE__ */ React.createElement("div", { className: "rowic" }, "\u2605"),/* @__PURE__ */ React.createElement("div", { className: "tx-main" }, /* @__PURE__ */ React.createElement("div", { className: "tx-merch" }, t.merchant || "Savings"), /* @__PURE__ */ React.createElement("div", { className: "tx-date" }, monthShort(C.monthOf(t.date)), " ", +t.date.slice(8, 10), t.amount < 0 ? " \xB7 taken back out" : " \xB7 set aside")), /* @__PURE__ */ React.createElement("span", { className: "tx-amt" + (t.amount > 0 ? " refund" : "") }, t.amount > 0 ? "+" : "\u2212", money(Math.abs(t.amount))), /* @__PURE__ */ React.createElement(DeleteX, { onDelete: () => deleteTxn(t.id) })))), view === "income" && /* @__PURE__ */ React.createElement(Acc, { title: "Income", cap: incomeList.length + (incomeList.length === 1 ? " deposit · " : " deposits · ") + fmt0(incomeList.reduce((s, e) => s + e.amount, 0)), defaultOpen: true }, (p.settings.monthlyIncome || 0) > 0 && /* @__PURE__ */ React.createElement("div", { className: "planline" }, /* @__PURE__ */ React.createElement("span", { className: "pl-name" }, "Monthly plan income"), /* @__PURE__ */ React.createElement("span", { className: "pl-amt" }, fmt0(p.settings.monthlyIncome), /* @__PURE__ */ React.createElement("small", null, "/mo"))), incomeList.length === 0 && /* @__PURE__ */ React.createElement("div", { className: "empty" }, /* @__PURE__ */ React.createElement("span", { className: "e-ic" }, "\u{1F4B5}"), "No deposits logged", showAll ? "" : " in " + monthLabel(month), ".", /* @__PURE__ */ React.createElement("br", null), "Tap + to log cash you were paid \u2014 card deposits sync automatically."), incomeList.map((e) => /* @__PURE__ */ React.createElement(SwipeRow, { key: e.id, onDelete: () => deleteIncome(e.id), className: "txrow" }, /* @__PURE__ */ React.createElement("div", { className: "rowic" }, "\u2193"),/* @__PURE__ */ React.createElement("div", { className: "tx-main" }, /* @__PURE__ */ React.createElement("div", { className: "tx-merch" }, e.source || "Deposit"), /* @__PURE__ */ React.createElement("div", { className: "tx-date" }, monthShort(C.monthOf(e.date)), " ", +e.date.slice(8, 10))), /* @__PURE__ */ React.createElement("span", { className: "tx-amt refund" }, "+", money(e.amount)), e.account && /* @__PURE__ */ React.createElement("button", { className: "btn quiet", style: { padding: "4px 8px", fontSize: 12, flex: "none" }, title: "Not income \u2014 it's a transfer", "aria-label": "Reclassify as transfer", onClick: (ev) => { ev.stopPropagation(); reclassIncome(e.id, false); } }, "\u21c4"), /* @__PURE__ */ React.createElement(DeleteX, { onDelete: () => deleteIncome(e.id) }))), excludedIncome.length > 0 && [xferHead(excludedIncome, "Transfers (not income)"), ...excludedIncome.map((e) => xferRow(e, true))]), false);
 }
 // (EditSheet removed \u2014 tap-to-edit retired; bank sync is the source of truth.
 // Spending categories are still editable inline via the .catpick <select>.)
