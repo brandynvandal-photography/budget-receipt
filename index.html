@@ -3128,7 +3128,7 @@ const TODAY = todayISO();
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden && todayISO() !== TODAY) location.reload();
 });
-const BUILD_ID = "2026-07-23.24";
+const BUILD_ID = "2026-07-23.25";
 const CURRENT_MONTH = TODAY.slice(0, 7);
 
 /* ---- i18n: follows the device language by default; the core experience is
@@ -4203,7 +4203,7 @@ function BankConnect({ settings, setSetting, disconnectBank }) {
   const passPanel = passNeeded ? /* @__PURE__ */ React.createElement("div", { className: "card", style: { padding: "14px 16px", margin: "10px 0" } },
     /* @__PURE__ */ React.createElement("div", { style: { fontWeight: 700, marginBottom: 4 } }, "Plaid Pass needed"),
     /* @__PURE__ */ React.createElement("div", { className: "hint", style: { marginTop: 0, marginBottom: 8 } }, "Plaid charges us for every connected bank, so Plaid links use an at-cost pass. SimpleFIN connections stay free. Enter your access code:"),
-    /* @__PURE__ */ React.createElement("div", { className: "hint", style: { marginTop: 0, marginBottom: 10 } }, "Don't have one? ", /* @__PURE__ */ React.createElement("a", { href: "https://inmystash.com/pass", target: "_blank", rel: "noopener" }, "Get a Plaid Pass — $3/mo"), " — your code appears right after checkout."),
+    /* @__PURE__ */ React.createElement("div", { className: "hint", style: { marginTop: 0, marginBottom: 10 } }, "Don't have one? ", /* @__PURE__ */ React.createElement("a", { href: "https://inmystash.com/pass", target: "_blank", rel: "noopener" }, "Get a Plaid Pass — $2/mo"), " — your code appears right after checkout."),
     /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 8 } },
       /* @__PURE__ */ React.createElement("input", { className: "lk-input", style: { letterSpacing: "normal", textAlign: "left", flex: 1 }, placeholder: "Access code", value: passCode, onChange: (e) => setPassCode(e.target.value) }),
       /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: redeemPass, disabled: !passCode.trim() }, "Redeem"))) : null;
