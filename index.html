@@ -2223,6 +2223,7 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
       return callApi("POST", "/connections/" + connectionId + "/transactions", { vaultKey: vaultKey(), sinceDays: days }).then(function (r) { return { transactions: r.transactions || [], balances: r.balances || [], institutions: r.institutions || [] }; });
     },
     disconnect: function (connectionId) { return callApi("DELETE", "/connections/" + connectionId, { vaultKey: vaultKey() }).catch(function () { return true; }); },
+    redeem: function (code) { return callApi("POST", "/entitlement", { code: code }); },
     // Background device sync: the FULL store is AES-GCM-encrypted HERE with
     // the device vault key before upload — the relay only ever holds
     // ciphertext it cannot read (vaultKey is never sent on these calls).
@@ -3127,7 +3128,7 @@ const TODAY = todayISO();
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden && todayISO() !== TODAY) location.reload();
 });
-const BUILD_ID = "2026-07-23.19";
+const BUILD_ID = "2026-07-23.20";
 const CURRENT_MONTH = TODAY.slice(0, 7);
 
 /* ---- i18n: follows the device language by default; the core experience is
@@ -4094,6 +4095,16 @@ function BankConnect({ settings, setSetting, disconnectBank }) {
     setTimeout(() => setJustAdded(null), 2200);
     setPhase("idle"); setSession(null); setInsts([]); setSetupToken("");
   };
+  const [passNeeded, setPassNeeded] = useState(false);
+  const [passCode, setPassCode] = useState("");
+  const redeemPass = () => {
+    const R2 = window.BankProviderRelay;
+    if (!R2 || !R2.redeem || !passCode.trim()) return;
+    setErr(""); setPhase("working");
+    R2.redeem(passCode.trim())
+      .then(() => { setPassNeeded(false); setPassCode(""); start(); })
+      .catch(() => { setErr("That code didn't work — check it and try again."); setPhase("idle"); });
+  };
   const start = () => {
     if (!P) { setErr("Bank connections aren't available right now."); setPhase("error"); return; }
     setErr(""); setPhase("working");
@@ -4126,7 +4137,12 @@ function BankConnect({ settings, setSetting, disconnectBank }) {
       } else {
         setSession(r.session); setInsts(r.institutions || []); setPhase("picking");
       }
-    }).catch(() => { setErr("Couldn't start. Try again."); setPhase("error"); });
+    }).catch((e) => {
+      const msg = String(e && e.message || e);
+      if (msg === "plaid_pass_required") { setPassNeeded(true); setPhase("idle"); setErr(""); return; }
+      if (msg === "plaid_item_cap") { setErr("Two connected banks per person is the limit for now."); setPhase("error"); return; }
+      setErr("Couldn't start. Try again."); setPhase("error");
+    });
   };
   const pick = (inst) => {
     setPhase("working");
@@ -4147,6 +4163,12 @@ function BankConnect({ settings, setSetting, disconnectBank }) {
     if (P && P.disconnect) { P.disconnect(l.connectionId).catch(() => {}); }
     setSetting("bankLinks", (settings.bankLinks || []).filter((x) => x.connectionId !== l.connectionId));
   };
+  const passPanel = passNeeded ? /* @__PURE__ */ React.createElement("div", { className: "card", style: { padding: "14px 16px", margin: "10px 0" } },
+    /* @__PURE__ */ React.createElement("div", { style: { fontWeight: 700, marginBottom: 4 } }, "Plaid Pass needed"),
+    /* @__PURE__ */ React.createElement("div", { className: "hint", style: { marginTop: 0, marginBottom: 10 } }, "Plaid charges us for every connected bank, so Plaid links use an at-cost pass. SimpleFIN connections stay free. Enter your access code:"),
+    /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 8 } },
+      /* @__PURE__ */ React.createElement("input", { className: "lk-input", style: { letterSpacing: "normal", textAlign: "left", flex: 1 }, placeholder: "Access code", value: passCode, onChange: (e) => setPassCode(e.target.value) }),
+      /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: redeemPass, disabled: !passCode.trim() }, "Redeem"))) : null;
   const rows = shownLinks.map((l) => /* @__PURE__ */ React.createElement("div", { key: l.id || l.connectionId, className: "bank-row" + (justAdded === (l.id || l.connectionId) ? " just-added" : "") },
     avatar(l.institution, 34),
     /* @__PURE__ */ React.createElement("div", { className: "bank-main" },
@@ -4177,6 +4199,7 @@ function BankConnect({ settings, setSetting, disconnectBank }) {
   const emptyForSource = phase === "idle" && shownLinks.length === 0 && links.some((l) => (l.provider || "mock") !== activeProvider);
   return /* @__PURE__ */ React.createElement("div", { className: "bank-connect" },
     rows.length > 0 && /* @__PURE__ */ React.createElement("div", { className: "bank-list" }, rows),
+    passPanel,
     emptyForSource && /* @__PURE__ */ React.createElement("div", { className: "bank-preview-note" }, "No banks connected through " + srcLabel + " yet."),
     err && /* @__PURE__ */ React.createElement("div", { className: "bank-err" }, err),
     picker, tokenPanel, cta,
