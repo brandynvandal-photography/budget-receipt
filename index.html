@@ -4670,8 +4670,13 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     // amount or its id when it posts (double-counting), or be dropped entirely
     // (a hotel/gas hold that never clears → a phantom charge). We wait for the
     // posted row. Balance-delta auto-ledger still reflects the held funds.
-    return inbox.filter((r) => r && r.id && r.date && r.cents > 0 && !r.pending && roles[r.account] !== "save" && roles[r.account] !== "ignore" && roles[r.account] !== "credit" && !seen["sf-" + r.id] && !txnsRaw.some((t) => t.id === "sf-" + r.id) && !incomeRaw.some((e) => e.id === "sf-" + r.id));
-  }, [inbox, data.sfSeen, data.sfMap, txnsRaw, incomeRaw]);
+    // Rows from accounts that belong to no CURRENT connection are never
+    // offered — stale/disconnected-account leftovers must not re-import.
+    const liveNames = {};
+    (settings.bankLinks || []).forEach((l) => { if (l.provider === "simplefin" || l.provider === "plaid") (l.accounts || []).forEach((a) => { if (a && a.name) liveNames[a.name] = 1; }); });
+    const gateLive = Object.keys(liveNames).length > 0;
+    return inbox.filter((r) => r && r.id && r.date && r.cents > 0 && !r.pending && (!gateLive || !r.account || liveNames[r.account]) && roles[r.account] !== "save" && roles[r.account] !== "ignore" && roles[r.account] !== "credit" && !seen["sf-" + r.id] && !txnsRaw.some((t) => t.id === "sf-" + r.id) && !incomeRaw.some((e) => e.id === "sf-" + r.id));
+  }, [inbox, data.sfSeen, data.sfMap, txnsRaw, incomeRaw, settings.bankLinks]);
   // zero-touch: new accounts assign their own role by name (savings-ish
   // names, e.g. "Chime Savings"/"Fidelity", pool into Savings; the rest is
   // In the bank), then bank-role rows auto-import with guessed categories
@@ -4680,11 +4685,18 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
   // and roles can be overridden in Settings.
   useEffect(() => {
     const known = data.sfMap || {};
+    // Only assign roles for accounts that belong to a CURRENT connection —
+    // lingering inbox rows from stale/disconnected accounts must not
+    // resurrect their roles (that re-opens the door the sweep just closed).
+    const liveNames = {};
+    (settings.bankLinks || []).forEach((l) => { if (l.provider === "simplefin" || l.provider === "plaid") (l.accounts || []).forEach((a) => { if (a && a.name) liveNames[a.name] = 1; }); });
+    const gateLive = Object.keys(liveNames).length > 0;
     const names = {};
     (sfBal || []).forEach((b) => { if (b && b.account) names[b.account] = 1; });
     (inbox || []).forEach((r) => { if (r && r.account) names[r.account] = 1; });
     const adds = {};
     Object.keys(names).forEach((a) => {
+      if (gateLive && !liveNames[a]) return;
       // Only spendable cash/checking counts as "In the bank". Loans/mortgages
       // are liabilities (ignore); credit cards are their own bucket; savings,
       // money-market, CD, and investment/retirement accounts pool into Savings.
@@ -4717,7 +4729,7 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
       const cat = kind === "spend" && R ? (R.guessCategory(r.label, categories, merchantMap) || (categories.some((c) => c.id === PFC_CAT[pfc]) ? PFC_CAT[pfc] : "") || "") : "";
       return { ...r, kind, categoryId: cat };
     }), []);
-  }, [sfBal, inbox, inboxNew, data.sfMap]);
+  }, [sfBal, inbox, inboxNew, data.sfMap, settings.bankLinks]);
   // source-of-truth: mapped balances auto-apply as anchors whenever the
   // bank reports something newer than what we hold
   useEffect(() => {
@@ -4956,6 +4968,11 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     links.forEach((l) => (l.accounts || []).forEach((a) => { if (a && a.name) live[a.name] = 1; }));
     if (!Object.keys(live).length) return;
     const stale = (e) => e && e.account && !live[e.account];
+    // Shed stale rows from the in-session inbox/balance state too — otherwise
+    // the zero-touch importer re-assigns their roles and re-imports exactly
+    // what was just purged, and totals flicker in an endless purge/import loop.
+    setInbox((prev) => { if (!prev) return prev; const nx = prev.filter((r) => !stale(r)); return nx.length !== prev.length ? nx : prev; });
+    setSfBal((prev) => { if (!prev) return prev; const nx = prev.filter((b) => !stale(b)); return nx.length !== prev.length ? nx : prev; });
     setData((d) => {
       const txStale = (d.txns || []).some(stale), inStale = (d.income || []).some(stale);
       const mapStale = Object.keys(d.sfMap || {}).some((k) => !live[k]);
