@@ -3122,7 +3122,7 @@ const TODAY = todayISO();
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden && todayISO() !== TODAY) location.reload();
 });
-const BUILD_ID = "2026-07-23.12";
+const BUILD_ID = "2026-07-23.13";
 const CURRENT_MONTH = TODAY.slice(0, 7);
 
 /* ---- i18n: follows the device language by default; the core experience is
@@ -4800,11 +4800,11 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
       // that money already left checking as funding transfers. Never spending.
       const securedSweep = /payment from secured/i.test(r.label || "");
       const spendHint = !securedSweep && /\b(zelle|venmo|cash ?app|paypal|apple cash|pay anyone|pay friends|western union|moneygram|atm|withdrawal|withdraw|cash out|direct debit|ach debit|dda debit|bill ?pay|credit builder|card payment|credit card|secured card)\b/i.test(r.label || "");
-      const saveHint = r.kind === "spend" && /\b(round ?up|save when you get paid|auto ?save)\b/i.test(r.label || "");
+      const saveHint = r.kind === "spend" && /\b(round ?up|save when you get paid|auto ?save)\b|transfer to .*sav/i.test(r.label || "");
       const isXfer = xv ? xv === "transfer"
         : securedSweep ? true
         : (r.kind === "spend"
-          ? (!spendHint && !saveHint && (xferPfc || /\b(transfer|xfer|to savings|to checking|internal transfer|wire transfer|fidelity|vanguard|robinhood|coinbase)\b/i.test(r.label || "")))
+          ? (!spendHint && !saveHint && (xferPfc || /\b(transfer|xfer|to checking|internal transfer|wire transfer|fidelity|vanguard|robinhood|coinbase)\b/i.test(r.label || "")))
           : (xferPfc || /\b(transfer|xfer)\b/i.test(r.label || "")));
       const kind = isXfer ? "transfer" : r.kind;
       const savC = (categories.find((c) => c.class === "SAVING") || {}).id;
@@ -5091,7 +5091,7 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     // stays real spending.)
     const MYPAY = /\bmypay (advance|repayment)\b/i;
     const IN_XFER = /\b(transfer|xfer)\b/i;
-    const OUT_XFER = /\b(transfer|xfer|to savings|to checking|internal transfer|wire transfer|fidelity|vanguard|robinhood|coinbase)\b/i;
+    const OUT_XFER = /\b(transfer|xfer|to checking|internal transfer|wire transfer|fidelity|vanguard|robinhood|coinbase)\b/i;
     // Money that LEAVES your life is spending even when the label says
     // "transfer": P2P payments to other people (Zelle, Venmo, Cash App,
     // Chime Pay Anyone…), cash leaving via ATM/withdrawal, and merchant
@@ -5099,7 +5099,7 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     const SECURED = /payment from secured/i;   // Chime Credit Builder internal sweep — always a transfer
     const P2P = /\b(zelle|venmo|cash ?app|paypal|apple cash|pay anyone|pay friends|western union|moneygram|atm|withdrawal|withdraw|cash out|direct debit|ach debit|dda debit|bill ?pay|credit builder|card payment|credit card|secured card)\b/i;
     // Round-ups/auto-saves count as OUT, routed to the savings category.
-    const SAVE_HINT = /\b(round ?up|save when you get paid|auto ?save)\b/i;
+    const SAVE_HINT = /\b(round ?up|save when you get paid|auto ?save)\b|transfer to .*sav/i;
     // The user's learned classifications (xferMap) and per-row pins
     // (xferExempt) beat the regexes in BOTH directions.
     const XM = data.xferMap || {};
@@ -5120,7 +5120,7 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
       const lab = t.merchant || "";
       if (XM[normXfer(lab)] === "transfer") return;
       if (t.xferExempt && t.isTransfer) return;   // pinned AS transfer: leave alone
-      const sv = SAVE_HINT.test(lab) || /transfer to .*sav/i.test(lab), sp = P2P.test(lab) && !SECURED.test(lab);
+      const sv = SAVE_HINT.test(lab), sp = P2P.test(lab) && !SECURED.test(lab);
       if (t.isTransfer && (sv || sp)) unmarkT[t.id] = 1;
       if (sv && savCat && t.categoryId !== savCat) recatT[t.id] = savCat;
       else if ((sv || sp) && t.isTransfer && t.categoryId == null && !recatT[t.id]) recatT[t.id] = "gen";
