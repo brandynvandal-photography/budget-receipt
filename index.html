@@ -4940,6 +4940,37 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     });
     setSfBal((prev) => lastConn ? [] : (prev || []).filter((b) => !(b && names[b.account])));
   };
+  // Stale-bank sweep: once a LIVE sync has reported (sfBal present), any
+  // bank-tagged entries whose account belongs to NO current connection are
+  // leftovers — sandbox/demo-era imports, or connections removed before the
+  // disconnect-purge existed — and they pollute Trends. Purge them, their
+  // roles, and their seen-markers. Manual entries (no account tag) and
+  // pre-bank plan history are untouched; a renamed account's history simply
+  // re-imports from the feed under its new name. Legacy sfHist (the old
+  // GitHub-Action balance series) is cleared too when that path is off,
+  // since it can't regenerate and may chart stale balances.
+  useEffect(() => {
+    const links = (settings.bankLinks || []).filter((l) => l.provider === "simplefin" || l.provider === "plaid");
+    if (!links.length || !sfBal || !sfBal.length) return;
+    const live = {};
+    links.forEach((l) => (l.accounts || []).forEach((a) => { if (a && a.name) live[a.name] = 1; }));
+    if (!Object.keys(live).length) return;
+    const stale = (e) => e && e.account && !live[e.account];
+    setData((d) => {
+      const txStale = (d.txns || []).some(stale), inStale = (d.income || []).some(stale);
+      const mapStale = Object.keys(d.sfMap || {}).some((k) => !live[k]);
+      if (!txStale && !inStale && !mapStale) return d;
+      const removedIds = [];
+      const keep = (arr) => (arr || []).filter((e) => { if (stale(e)) { if (e.id) removedIds.push(e.id); return false; } return true; });
+      const txns = keep(d.txns), income = keep(d.income);
+      const sfMap = {};
+      Object.keys(d.sfMap || {}).forEach((k) => { if (live[k]) sfMap[k] = d.sfMap[k]; });
+      const sfSeen = { ...(d.sfSeen || {}) };
+      removedIds.forEach((id) => delete sfSeen[id]);
+      const dropHist = !(syncCfg && syncCfg.enabled);
+      return { ...d, txns, income, sfMap, sfSeen, ...(dropHist ? { sfHist: {}, sfShas: {} } : {}) };
+    });
+  }, [settings.bankLinks, sfBal, syncCfg, setData]);
   // bank savings activity (round-ups, transfers, interest) — display-only:
   // these are already counted through the savings BALANCE, never re-imported
   const savingsFeed = useMemo(() => {
