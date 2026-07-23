@@ -2308,7 +2308,32 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
       return callApi("POST", "/connections/" + connectionId + "/transactions", { vaultKey: vaultKey(), sinceDays: days }).then(function (r) { return { transactions: r.transactions || [], balances: r.balances || [], institutions: r.institutions || [] }; });
     },
     disconnect: function (connectionId) { return callApi("DELETE", "/connections/" + connectionId, { vaultKey: vaultKey() }).catch(function () { return true; }); },
+    // Background device sync: the FULL store is AES-GCM-encrypted HERE with
+    // the device vault key before upload — the relay only ever holds
+    // ciphertext it cannot read (vaultKey is never sent on these calls).
+    snapPush: function (plain) {
+      return importVaultAes().then(function (k) {
+        var iv = rnd(12);
+        return crypto.subtle.encrypt({ name: "AES-GCM", iv: iv }, k, new TextEncoder().encode(plain)).then(function (ct) {
+          return callApi("PUT", "/snapshot", { blob: b64(iv) + "." + b64(new Uint8Array(ct)) });
+        });
+      });
+    },
+    snapPull: function () {
+      return callApi("GET", "/snapshot").then(function (r) {
+        if (!r || !r.blob) return null;
+        var parts = String(r.blob).split(".");
+        var iv = Uint8Array.from(atob(parts[0]), function (c) { return c.charCodeAt(0); });
+        var ct = Uint8Array.from(atob(parts[1]), function (c) { return c.charCodeAt(0); });
+        return importVaultAes().then(function (k) { return crypto.subtle.decrypt({ name: "AES-GCM", iv: iv }, k, ct); })
+          .then(function (buf) { return new TextDecoder().decode(buf); });
+      }).catch(function () { return null; });
+    },
   };
+  function importVaultAes() {
+    var raw = Uint8Array.from(atob(vaultKey()), function (c) { return c.charCodeAt(0); });
+    return crypto.subtle.importKey("raw", raw, "AES-GCM", false, ["encrypt", "decrypt"]);
+  }
   root.BankProviderRelay = relay;
 
   // Plaid provider — no per-user account: the user just logs into their bank via
@@ -3752,7 +3777,14 @@ function App() {
   const saveTimer = useRef(null);
   const dataRef = useRef(null);
   const syncTimer = useRef(null);
-  const [syncCfg, setSyncCfgState] = useState(loadSyncCfg);
+  const [bootLoaded, setBootLoaded] = useState(false);
+  const [syncCfg, setSyncCfgState] = useState(() => {
+    // GitHub sync is retired — background relay sync replaced it. Disable any
+    // stored config so the old pull path never runs again.
+    const c = loadSyncCfg();
+    if (c && c.enabled) { c.enabled = false; try { saveSyncCfg(c); } catch (e) {} }
+    return c;
+  });
   const syncCfgRef = useRef(syncCfg);
   const [syncInfo, setSyncInfo] = useState({ running: false, err: false, msg: "" });
   const runSync = useCallback(async () => {
@@ -3785,6 +3817,56 @@ function App() {
     setSyncCfgState(cfg);
     saveSyncCfg(cfg);
   }, []);
+  // Background device sync (replaces the manual GitHub option): the full
+  // store — E2E-encrypted on THIS device with the vault key — lives in the
+  // relay's KV. Pull+merge once per boot (tombstones respected by mergeData);
+  // pushes are debounced 15s after any change. The server cannot read it.
+  const snapRef = useRef({ pulled: false, pullDone: false, remoteHadData: false, timer: 0, lastPush: "" });
+  useEffect(() => {
+    // ORDER MATTERS: pull only after the persisted store finished loading
+    // (otherwise the merge races the load and gets clobbered), and never
+    // push until the pull resolved (otherwise a fresh device's empty store
+    // could overwrite the cloud copy).
+    if (!bootLoaded) return;
+    const P = window.BankProviderRelay;
+    if (!P || !P.snapPull || !(window.__stashHasRelayId && window.__stashHasRelayId())) return;
+    const schedulePush = () => {
+      const d = dataRef.current || data;
+      if (!d) return;
+      // empty-store guard: never blank a populated cloud copy
+      const localEmpty = ((d.txns || []).length + (d.income || []).length) === 0 && (((d.settings || {}).bankLinks || []).length === 0);
+      if (localEmpty && snapRef.current.remoteHadData) return;
+      const str = JSON.stringify(d);
+      if (str === snapRef.current.lastPush) return;
+      clearTimeout(snapRef.current.timer);
+      snapRef.current.timer = setTimeout(() => {
+        snapRef.current.lastPush = str;
+        if (P.snapPush) P.snapPush(str).catch(() => {});
+      }, 15e3);
+    };
+    if (!snapRef.current.pulled) {
+      snapRef.current.pulled = true;
+      P.snapPull().then((remoteStr) => {
+        let remote = null; try { remote = remoteStr ? JSON.parse(remoteStr) : null; } catch (e) {}
+        if (remote) {
+          snapRef.current.remoteHadData = ((remote.txns || []).length + (remote.income || []).length) > 0 || ((remote.settings || {}).bankLinks || []).length > 0;
+          if (window.BudgetSync && window.BudgetSync.mergeData) {
+            const merged = window.BudgetSync.mergeData(dataRef.current, remote);
+            if (merged && JSON.stringify(merged) !== JSON.stringify(dataRef.current)) {
+              dataRef.current = merged;
+              setDataRaw(merged);
+              try { STORE.save(merged); } catch (e) {}
+              setRev((n) => n + 1);
+            }
+          }
+        }
+        snapRef.current.pullDone = true;
+        schedulePush();                       // ref flip doesn't re-run the effect — schedule here
+      }).catch(() => { snapRef.current.pullDone = true; schedulePush(); });
+      return;
+    }
+    if (snapRef.current.pullDone) schedulePush();
+  }, [data, bootLoaded, rev]);
   useEffect(() => {
     let live = true;
     STORE.load().then((persisted) => {
@@ -3797,9 +3879,11 @@ function App() {
       if (isExisting && d.settings && d.settings.onboarded == null) d.settings.onboarded = true;
       dataRef.current = d;
       setDataRaw(d);
+      setBootLoaded(true);
       runSync();
     }).catch(() => {
       if (!live) return;
+      setBootLoaded(true);
       const d = freshData();
       dataRef.current = d;
       setDataRaw(d);
@@ -3836,6 +3920,7 @@ function App() {
       setDataRaw(d);
       setBootUnlocked(true);
       setEncEnv(null);
+      setBootLoaded(true);
       runSync();
       return true;
     },
@@ -6266,8 +6351,13 @@ function Activity(p) {
   const xferHead = (list, label) => /* @__PURE__ */ React.createElement("div", { className: "planline", style: { marginTop: 12 } },
     /* @__PURE__ */ React.createElement("span", { className: "pl-name" }, "⇄ ", label),
     /* @__PURE__ */ React.createElement("span", { className: "pl-amt" }, fmt0(list.reduce((s, r) => s + Math.abs(r.amount), 0))));
+  // WHERE the month's "out" went — so the header number is explainable at a
+  // glance: real purchases vs plan bills still held vs money set aside.
+  const outPurch = txns.reduce((s, t) => C.monthOf(t.date) === month && !t.isTransfer && !t.billCovered && !String(t.id || "").startsWith("rec") && !savingIds[t.categoryId] ? s + t.amount : s, 0);
+  const outBills = txns.reduce((s, t) => C.monthOf(t.date) === month && !t.isTransfer && !t.billCovered && String(t.id || "").startsWith("recbill") ? s + t.amount : s, 0);
+  const outSaved = Math.max(0, monthSpendC - outPurch - outBills);
   const uncatFirst = spendList;
-  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h2", { className: "screen-title" }, "Activity"), billPrompt && /* @__PURE__ */ React.createElement("div", { className: "billprompt-bubble billprompt-inline", role: "group", "aria-label": "Is this a recurring bill?" }, /* @__PURE__ */ React.createElement("div", { className: "bt-msg" }, "Is “", billPrompt.merchant, "” a recurring bill?"), /* @__PURE__ */ React.createElement("div", { className: "bt-row" }, /* @__PURE__ */ React.createElement("label", { className: "bt-day" }, "Comes out day ", /* @__PURE__ */ React.createElement("input", { type: "number", min: 1, max: 31, value: billPrompt.day, onChange: (e) => setBillPrompt({ ...billPrompt, day: Math.max(1, Math.min(31, +e.target.value || 1)) }) })), /* @__PURE__ */ React.createElement("div", { className: "bt-btns" }, /* @__PURE__ */ React.createElement("button", { className: "btn quiet", onClick: () => setBillPrompt(null) }, "One-time"), /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: addRecurringBill }, "Every month"))), /* @__PURE__ */ React.createElement("div", { className: "bt-sub" }, money(billPrompt.amount), " · held back every month until you remove it in Settings → Recurring & upcoming")), /* @__PURE__ */ React.createElement(Swiper, { labels: ["In the bank", "Saved up", "Safety net"] }, /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "In the bank"), p.availableNow != null ? /* @__PURE__ */ React.createElement(AnimatedMoneySplit, { cents: p.availableNow, className: "bank-val" + (p.availableNow < 0 ? " overspent" : "") }) : /* @__PURE__ */ React.createElement("div", { className: "bank-val", style: { opacity: 0.5 } }, "\u2014"), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, (p.settings.paycheck || {}).amount > 0 ? money(p.settings.paycheck.amount) + " per paycheck \u00b7 " + fmt0(monthSpendC) + " out \u00b7 " + monthLabel(month) : fmt0(monthIncomeC) + " in \u00b7 " + fmt0(monthSpendC) + " out \u00b7 " + monthLabel(month))), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "Saved up"), /* @__PURE__ */ React.createElement(AnimatedFmt0, { className: "bank-val", cents: p.savedTotal }), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, (function(){ var names = Object.keys(p.sfMap || {}).filter(function(a){ return (p.sfMap || {})[a] === "save"; }); return names.length ? names.join(" + ") : "your savings, all in one place"; })())), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "Safety net"), /* @__PURE__ */ React.createElement("div", { className: "bank-val" }, p.runway === Infinity ? "\u2014" : p.runway.toFixed(1) + " mo"), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, "if income stopped"))), /* @__PURE__ */ React.createElement("div", { className: "seg", role: "group", "aria-label": "Filter activity" }, /* @__PURE__ */ React.createElement("button", { className: view === "spend" ? "on" : "", "aria-pressed": view === "spend", onClick: () => setView("spend") }, "Spending"), /* @__PURE__ */ React.createElement("button", { className: view === "income" ? "on" : "", "aria-pressed": view === "income", onClick: () => setView("income") }, "Income"), /* @__PURE__ */ React.createElement("button", { className: view === "save" ? "on" : "", "aria-pressed": view === "save", onClick: () => setView("save") }, "Savings")), /* @__PURE__ */ React.createElement("div", { className: "actbar" }, /* @__PURE__ */ React.createElement("select", { className: "actsort actmonth", value: showAll ? "all" : month, onChange: (e) => { const v = e.target.value; if (v === "all") setShowAll(true); else { setShowAll(false); setMonth(v); } }, "aria-label": "Filter by month" }, /* @__PURE__ */ React.createElement("option", { value: "all" }, "All months"), monthOptions.map((m) => /* @__PURE__ */ React.createElement("option", { key: m, value: m }, monthLabel(m)))), /* @__PURE__ */ React.createElement("input", { className: "actsearch", type: "search", inputMode: "search", placeholder: "\u{1F50D} Search", value: q, onChange: (e) => setQ(e.target.value) }), /* @__PURE__ */ React.createElement("select", { className: "actsort", value: sortBy, onChange: (e) => setSortBy(e.target.value), "aria-label": "Sort" }, /* @__PURE__ */ React.createElement("option", { value: "date" }, "Newest"), /* @__PURE__ */ React.createElement("option", { value: "amount" }, "Amount \u2193"))), view === "spend" && (() => {
+  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h2", { className: "screen-title" }, "Activity"), billPrompt && /* @__PURE__ */ React.createElement("div", { className: "billprompt-bubble billprompt-inline", role: "group", "aria-label": "Is this a recurring bill?" }, /* @__PURE__ */ React.createElement("div", { className: "bt-msg" }, "Is “", billPrompt.merchant, "” a recurring bill?"), /* @__PURE__ */ React.createElement("div", { className: "bt-row" }, /* @__PURE__ */ React.createElement("label", { className: "bt-day" }, "Comes out day ", /* @__PURE__ */ React.createElement("input", { type: "number", min: 1, max: 31, value: billPrompt.day, onChange: (e) => setBillPrompt({ ...billPrompt, day: Math.max(1, Math.min(31, +e.target.value || 1)) }) })), /* @__PURE__ */ React.createElement("div", { className: "bt-btns" }, /* @__PURE__ */ React.createElement("button", { className: "btn quiet", onClick: () => setBillPrompt(null) }, "One-time"), /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: addRecurringBill }, "Every month"))), /* @__PURE__ */ React.createElement("div", { className: "bt-sub" }, money(billPrompt.amount), " · held back every month until you remove it in Settings → Recurring & upcoming")), /* @__PURE__ */ React.createElement(Swiper, { labels: ["In the bank", "Saved up", "Safety net"] }, /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "In the bank"), p.availableNow != null ? /* @__PURE__ */ React.createElement(AnimatedMoneySplit, { cents: p.availableNow, className: "bank-val" + (p.availableNow < 0 ? " overspent" : "") }) : /* @__PURE__ */ React.createElement("div", { className: "bank-val", style: { opacity: 0.5 } }, "\u2014"), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, (p.settings.paycheck || {}).amount > 0 ? money(p.settings.paycheck.amount) + " per paycheck \u00b7 " + fmt0(monthSpendC) + " out \u00b7 " + monthLabel(month) : fmt0(monthIncomeC) + " in \u00b7 " + fmt0(monthSpendC) + " out \u00b7 " + monthLabel(month)), monthSpendC > 0 && /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, "= ", fmt0(outPurch), " spent \u00b7 ", fmt0(outBills), " bills held \u00b7 ", fmt0(outSaved), " set aside")), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "Saved up"), /* @__PURE__ */ React.createElement(AnimatedFmt0, { className: "bank-val", cents: p.savedTotal }), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, (function(){ var names = Object.keys(p.sfMap || {}).filter(function(a){ return (p.sfMap || {})[a] === "save"; }); return names.length ? names.join(" + ") : "your savings, all in one place"; })())), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "Safety net"), /* @__PURE__ */ React.createElement("div", { className: "bank-val" }, p.runway === Infinity ? "\u2014" : p.runway.toFixed(1) + " mo"), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, "if income stopped"))), /* @__PURE__ */ React.createElement("div", { className: "seg", role: "group", "aria-label": "Filter activity" }, /* @__PURE__ */ React.createElement("button", { className: view === "spend" ? "on" : "", "aria-pressed": view === "spend", onClick: () => setView("spend") }, "Spending"), /* @__PURE__ */ React.createElement("button", { className: view === "income" ? "on" : "", "aria-pressed": view === "income", onClick: () => setView("income") }, "Income"), /* @__PURE__ */ React.createElement("button", { className: view === "save" ? "on" : "", "aria-pressed": view === "save", onClick: () => setView("save") }, "Savings")), /* @__PURE__ */ React.createElement("div", { className: "actbar" }, /* @__PURE__ */ React.createElement("select", { className: "actsort actmonth", value: showAll ? "all" : month, onChange: (e) => { const v = e.target.value; if (v === "all") setShowAll(true); else { setShowAll(false); setMonth(v); } }, "aria-label": "Filter by month" }, /* @__PURE__ */ React.createElement("option", { value: "all" }, "All months"), monthOptions.map((m) => /* @__PURE__ */ React.createElement("option", { key: m, value: m }, monthLabel(m)))), /* @__PURE__ */ React.createElement("input", { className: "actsearch", type: "search", inputMode: "search", placeholder: "\u{1F50D} Search", value: q, onChange: (e) => setQ(e.target.value) }), /* @__PURE__ */ React.createElement("select", { className: "actsort", value: sortBy, onChange: (e) => setSortBy(e.target.value), "aria-label": "Sort" }, /* @__PURE__ */ React.createElement("option", { value: "date" }, "Newest"), /* @__PURE__ */ React.createElement("option", { value: "amount" }, "Amount \u2193"))), view === "spend" && (() => {
     const isBill = (t) => String(t.id || "").startsWith("recbill");
     const billRows = uncatFirst.filter(isBill);
     const manualRows = uncatFirst.filter((t) => !isBill(t));
@@ -6747,54 +6837,10 @@ function Settings(p) {
         }
       }
     ))
-  ), /* @__PURE__ */ React.createElement(Acc, { title: tr("set_banks"), cap: (settings.bankLinks || []).length ? ((settings.bankLinks.length) + " bank" + (settings.bankLinks.length === 1 ? "" : "s")) : tr("set_banks_none") }, /* @__PURE__ */ React.createElement("div", { className: "sub", style: { marginTop: 0, marginBottom: 12 } }, "Read-only connections. In My Stash can see balances and transactions — it can never move your money, and your data stays encrypted on this device."), syncCfg && syncCfg.enabled && /* @__PURE__ */ React.createElement("div", { className: "hint", style: { marginTop: 0, marginBottom: 12 } }, "Adding or removing a bank takes effect on this device right away. Your other devices catch up at the next sync — not instantly."), /* @__PURE__ */ React.createElement("div", { className: "bank-src" }, /* @__PURE__ */ React.createElement("span", null, "Connection source"), /* @__PURE__ */ React.createElement("select", { value: settings.bankProviderMode === "relay" || settings.bankProviderMode === "mock" ? settings.bankProviderMode : "plaid", onChange: (e) => setSetting("bankProviderMode", e.target.value), "aria-label": "Bank connection source" }, /* @__PURE__ */ React.createElement("option", { value: "plaid" }, "Plaid (tap & log in)"), /* @__PURE__ */ React.createElement("option", { value: "relay" }, "SimpleFIN (paste token)"), /* @__PURE__ */ React.createElement("option", { value: "mock" }, "Demo (simulated — not real)"))), /* @__PURE__ */ React.createElement(BankConnect, { settings, setSetting, disconnectBank })), /* @__PURE__ */ React.createElement(Acc, { title: "Recurring & upcoming", cap: (settings.commitments || []).length ? (settings.commitments.length + " item" + (settings.commitments.length === 1 ? "" : "s")) : "auto" }, /* @__PURE__ */ React.createElement(CommitmentsSetup, { settings, setSetting })), /* @__PURE__ */ React.createElement(Acc, { title: "App & data", cap: syncCfg && syncCfg.enabled ? "sync on" : "sync off" }, /* @__PURE__ */ React.createElement("div", { className: "lock-row", style: { marginTop: 0, marginBottom: 10 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 16, fontWeight: 700, letterSpacing: "-.01em", color: "var(--ink)" } }, tr("set_language")), /* @__PURE__ */ React.createElement("select", { value: settings.lang || "system", onChange: (e) => setSetting("lang", e.target.value), "aria-label": tr("set_language") }, /* @__PURE__ */ React.createElement("option", { value: "system" }, tr("set_language_system")), Object.keys(LANG_NAMES).map((code) => /* @__PURE__ */ React.createElement("option", { key: code, value: code }, LANG_NAMES[code])))), /* @__PURE__ */ React.createElement("div", { className: "lock-row", style: { marginTop: 0, marginBottom: 10 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 16, fontWeight: 700, letterSpacing: "-.01em", color: "var(--ink)" } }, "Text size"), /* @__PURE__ */ React.createElement("select", { value: String(settings.uiScale || 1), onChange: (e) => setSetting("uiScale", +e.target.value), "aria-label": "Text size" }, /* @__PURE__ */ React.createElement("option", { value: "1" }, "Default"), /* @__PURE__ */ React.createElement("option", { value: "1.15" }, "Large"), /* @__PURE__ */ React.createElement("option", { value: "1.3" }, "Largest"))), /* @__PURE__ */ React.createElement(
+  ), /* @__PURE__ */ React.createElement(Acc, { title: tr("set_banks"), cap: (settings.bankLinks || []).length ? ((settings.bankLinks.length) + " bank" + (settings.bankLinks.length === 1 ? "" : "s")) : tr("set_banks_none") }, /* @__PURE__ */ React.createElement("div", { className: "sub", style: { marginTop: 0, marginBottom: 12 } }, "Read-only connections. In My Stash can see balances and transactions — it can never move your money, and your data stays encrypted on this device."), /* @__PURE__ */ React.createElement("div", { className: "hint", style: { marginTop: 0, marginBottom: 12 } }, "Adding or removing a bank takes effect on this device right away. Your other devices catch up at the next sync — not instantly."), /* @__PURE__ */ React.createElement("div", { className: "bank-src" }, /* @__PURE__ */ React.createElement("span", null, "Connection source"), /* @__PURE__ */ React.createElement("select", { value: settings.bankProviderMode === "relay" || settings.bankProviderMode === "mock" ? settings.bankProviderMode : "plaid", onChange: (e) => setSetting("bankProviderMode", e.target.value), "aria-label": "Bank connection source" }, /* @__PURE__ */ React.createElement("option", { value: "plaid" }, "Plaid (tap & log in)"), /* @__PURE__ */ React.createElement("option", { value: "relay" }, "SimpleFIN (paste token)"), /* @__PURE__ */ React.createElement("option", { value: "mock" }, "Demo (simulated — not real)"))), /* @__PURE__ */ React.createElement(BankConnect, { settings, setSetting, disconnectBank })), /* @__PURE__ */ React.createElement(Acc, { title: "Recurring & upcoming", cap: (settings.commitments || []).length ? (settings.commitments.length + " item" + (settings.commitments.length === 1 ? "" : "s")) : "auto" }, /* @__PURE__ */ React.createElement(CommitmentsSetup, { settings, setSetting })), /* @__PURE__ */ React.createElement(Acc, { title: "App & data", cap: "language · text size" }, /* @__PURE__ */ React.createElement("div", { className: "lock-row", style: { marginTop: 0, marginBottom: 10 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 16, fontWeight: 700, letterSpacing: "-.01em", color: "var(--ink)" } }, tr("set_language")), /* @__PURE__ */ React.createElement("select", { value: settings.lang || "system", onChange: (e) => setSetting("lang", e.target.value), "aria-label": tr("set_language") }, /* @__PURE__ */ React.createElement("option", { value: "system" }, tr("set_language_system")), Object.keys(LANG_NAMES).map((code) => /* @__PURE__ */ React.createElement("option", { key: code, value: code }, LANG_NAMES[code])))), /* @__PURE__ */ React.createElement("div", { className: "lock-row", style: { marginTop: 0, marginBottom: 10 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 16, fontWeight: 700, letterSpacing: "-.01em", color: "var(--ink)" } }, "Text size"), /* @__PURE__ */ React.createElement("select", { value: String(settings.uiScale || 1), onChange: (e) => setSetting("uiScale", +e.target.value), "aria-label": "Text size" }, /* @__PURE__ */ React.createElement("option", { value: "1" }, "Default"), /* @__PURE__ */ React.createElement("option", { value: "1.15" }, "Large"), /* @__PURE__ */ React.createElement("option", { value: "1.3" }, "Largest"))), /* @__PURE__ */ React.createElement(
     Acc,
-    {
-      title: "Sync across devices",
-      cap: syncCfg && syncCfg.enabled ? "on \xB7 " + (syncCfg.repo || "") : "off"
-    },
-    /* @__PURE__ */ React.createElement("div", { className: "hint", style: { marginTop: 0 } }, "Saves an encrypted copy to a private GitHub repo you own \u2014 GitHub only ever sees ciphertext. Use a fine-grained token scoped to just this repo (Contents: read/write) with an expiry date."),
-    /* @__PURE__ */ React.createElement("div", { className: "f-grid", style: { display: "grid", gridTemplateColumns: "1fr", gap: 9 } }, /* @__PURE__ */ React.createElement(
-      "input",
-      {
-        placeholder: "Private repo (yourname/budget-data)",
-        autoCapitalize: "none",
-        autoCorrect: "off",
-        value: sc.repo,
-        onChange: (e) => setSc({ ...sc, repo: e.target.value }),
-        style: { border: "1px solid var(--ring)", borderRadius: 10, padding: 12, background: "var(--page)" }
-      }
-    ), /* @__PURE__ */ React.createElement(
-      "input",
-      {
-        type: "password",
-        placeholder: "GitHub token (Contents read/write)",
-        autoCapitalize: "none",
-        value: sc.token,
-        onChange: (e) => setSc({ ...sc, token: e.target.value }),
-        style: { border: "1px solid var(--ring)", borderRadius: 10, padding: 12, background: "var(--page)" }
-      }
-    ), /* @__PURE__ */ React.createElement(
-      "input",
-      {
-        type: "password",
-        placeholder: "Encryption passphrase (same on every device)",
-        value: sc.pass,
-        onChange: (e) => setSc({ ...sc, pass: e.target.value }),
-        style: { border: "1px solid var(--ring)", borderRadius: 10, padding: 12, background: "var(--page)" }
-      }
-    )),
-    /* @__PURE__ */ React.createElement("div", { className: "btn-row" }, !(syncCfg && syncCfg.enabled) ? /* @__PURE__ */ React.createElement(
-      "button",
-      {
-        className: "btn primary",
-        disabled: !sc.repo || !sc.token || !sc.pass,
-        onClick: () => applySync(true)
-      },
-      "Turn on sync"
-    ) : JSON.stringify({ r: sc.repo.trim(), t: sc.token, p: sc.pass }) !== JSON.stringify({ r: (syncCfg.repo || "").trim(), t: syncCfg.token, p: syncCfg.pass }) ? /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: () => applySync(true) }, "Save changes & sync") : /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: runSync, disabled: syncInfo.running }, syncInfo.running ? "Syncing\u2026" : "Sync now"), " ", /* @__PURE__ */ React.createElement("button", { className: "btn quiet", onClick: () => applySync(false) }, "Turn off"))),
-    syncInfo.msg && /* @__PURE__ */ React.createElement("div", { className: "sub", style: { marginTop: 8, color: syncInfo.err ? "var(--crit)" : "var(--good-text)" } }, syncInfo.err ? "\u26A0 " : "\u2713 ", syncInfo.msg),
-    /* @__PURE__ */ React.createElement("div", { className: "hint" }, "Your token and passphrase are stored on this device so sync can run automatically \u2014 keep the token scoped with an expiry so a leak stays contained. Forget the passphrase and the synced copy is unrecoverable; your on-device data stays fine.")
+    { title: "Sync across devices", cap: "automatic" },
+    /* @__PURE__ */ React.createElement("div", { className: "hint", style: { marginTop: 0 } }, "Your devices stay in sync automatically in the background — nothing to set up. The synced copy is encrypted on this device before it leaves, so the server only ever holds ciphertext it cannot read.")
   ), /* @__PURE__ */ React.createElement(Acc, { title: "Your data", cap: "export \xB7 import \xB7 start over" }, /* @__PURE__ */ React.createElement("div", { className: "btn-row", style: { marginTop: 0 } }, /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: exportJSON }, "Export backup"), /* @__PURE__ */ React.createElement("label", { className: "btn quiet filelabel" }, "Import backup", /* @__PURE__ */ React.createElement(
     "input",
     {
