@@ -713,11 +713,14 @@ button:focus-visible,a:focus-visible,select:focus-visible,input:focus-visible,la
 .jarchart{display:flex;align-items:flex-end;justify-content:space-around;gap:2px;padding:8px 2px 2px}
 .jarcol{background:none;border:none;display:flex;flex-direction:column;align-items:center;gap:5px;cursor:pointer;padding:5px 2px 3px;border-radius:12px;flex:1;min-width:0}
 .jarcol-val{font-size:11px;font-weight:700;color:var(--ink);height:14px;line-height:14px;font-variant-numeric:tabular-nums;white-space:nowrap}
-.jarcol-label{font-size:11px;color:var(--muted)}
-.jarcol svg{transition:transform .16s ease}
+/* label weight is CONSTANT (bold) — only color changes on selection. A
+   weight flip changes glyph metrics mid-transition and Safari can leave
+   stale paint ("part of the e") behind when the selection moves. */
+.jarcol-label{font-size:11px;font-weight:700;color:var(--muted)}
+.jarcol svg{transition:transform .16s ease;transform:translateZ(0);backface-visibility:hidden;-webkit-backface-visibility:hidden}
 .jarcol.on{background:rgba(255,255,255,.05)}
-.jarcol.on .jarcol-label{color:var(--ink);font-weight:700}
-.jarcol.on svg{transform:scale(1.14)}
+.jarcol.on .jarcol-label{color:var(--ink)}
+.jarcol.on svg{transform:scale(1.14) translateZ(0)}
 .jarcol.neg.on{background:rgba(255,143,143,.1)}
 /* iOS "liquid glass": translucent, backdrop-blurred surfaces with a light top edge */
 @supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
@@ -5088,6 +5091,44 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
       income: d.income.map((e) => markI[e.id] ? { ...e, isTransfer: 1 } : e)
     }));
   }, [data.txns, data.income, data.xferMap, setData]);
+  // Content dedupe: the SAME real-world transaction imported twice under
+  // DIFFERENT ids — e.g. a bank connected via SimpleFIN historically and via
+  // Plaid now serves the same feed twice; account NAMES match, so the
+  // account-level sweeps rightly keep both copies. Two bank-tagged rows with
+  // identical account+date+amount+label are one transaction: keep the first,
+  // tombstone the rest (device sync can't resurrect them), and mark the
+  // dropped ids seen so the next fetch can't re-offer them. Known tradeoff:
+  // a genuine same-day, same-amount, same-merchant double purchase collapses
+  // too — far rarer than the dual-provider duplication it cures, and
+  // re-addable by hand.
+  useEffect(() => {
+    const seenKey = {}, dropT = [], dropI = [];
+    const scan = (arr, isInc, bag) => {
+      (arr || []).forEach((e) => {
+        if (!e || !e.account || !e.id || !e.date) return;
+        const k = e.account + "|" + e.date + "|" + e.amount + "|" + normXfer(isInc ? e.source : e.merchant);
+        if (seenKey[k]) bag.push(e.id); else seenKey[k] = 1;
+      });
+    };
+    scan(data.txns, false, dropT); scan(data.income, true, dropI);
+    if (!dropT.length && !dropI.length) return;
+    setData((d) => {
+      const dt = {}; dropT.forEach((id) => { dt[id] = 1; });
+      const di = {}; dropI.forEach((id) => { di[id] = 1; });
+      const sfSeen = { ...(d.sfSeen || {}) };
+      dropT.concat(dropI).forEach((id) => { sfSeen[id] = 1; });
+      return {
+        ...d,
+        txns: (d.txns || []).filter((t) => !dt[t.id]),
+        income: (d.income || []).filter((e) => !di[e.id]),
+        sfSeen,
+        deleted: {
+          txns: [...((d.deleted || {}).txns || []), ...dropT.map(stone)].slice(-1e3),
+          income: [...((d.deleted || {}).income || []), ...dropI.map(stone)].slice(-1e3)
+        }
+      };
+    });
+  }, [data.txns, data.income, setData]);
   // Plan-bill reconciliation: a recurring bill you configured ("held back
   // every month") eventually ARRIVES in the bank feed as the real payment —
   // counting both the plan instance and the bank row doubles the month's
@@ -5736,7 +5777,7 @@ function SimpleHome(p) {
   (p.categories || []).forEach((c) => {
     if (c.class === "SAVING") savingIdSet[c.id] = 1;
   });
-  const variableSpendMTD = txns.reduce((sum, t) => C.monthOf(t.date) === month && !t.isTransfer && !String(t.id || "").startsWith("rec") && !savingIdSet[t.categoryId] ? sum + t.amount : sum, 0);
+  const variableSpendMTD = txns.reduce((sum, t) => C.monthOf(t.date) === month && !t.isTransfer && !t.billCovered && !String(t.id || "").startsWith("rec") && !savingIdSet[t.categoryId] ? sum + t.amount : sum, 0);
   const savedMTD = txns.reduce((sum, t) => C.monthOf(t.date) === month && savingIdSet[t.categoryId] ? sum + t.amount : sum, 0);
   const outC = monthSpendC - savedMTD;
   const projectedEnd = inProgressCalc() && dayNum >= 3 ? C.projectMonthEnd(monthNet, variableSpendMTD, dayNum, daysInMo) : null;
@@ -6026,7 +6067,7 @@ function Trends(p) {
   const catRows = useMemo(() => {
     const sums = {};
     txns.forEach((t) => {
-      if (t.isTransfer || C.monthOf(t.date) !== month) return;
+      if (t.isTransfer || t.billCovered || C.monthOf(t.date) !== month) return;
       const k = t.categoryId || "_un";
       sums[k] = (sums[k] || 0) + t.amount;
     });
