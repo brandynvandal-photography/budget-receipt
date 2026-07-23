@@ -2146,107 +2146,7 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
 })(typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : this));
 
 </script>
-<script>/* BankProvider — bank-connection adapter (privacy-forward).
- *
- * Stash keeps financial data on-device and end-to-end encrypted. Connecting a
- * bank is the ONE thing that cannot be fully on-device: an aggregator's secret
- * key can never ship in the client (anyone could extract it). So a *thin,
- * stateless relay* backend does exactly two jobs — (1) run the bank-link
- * handshake and hold the read-only access token (envelope-encrypted at rest,
- * the single server-side secret), and (2) relay a fetch on demand. It never
- * persists transactions, balances, or budget; those are returned once and
- * stored encrypted on THIS device. In the on-demand model the token is only
- * usable while the user is in the app, so the server can't read finances
- * unattended.
- *
- * This interface is shaped after SimpleFIN — read-only by architecture: it can
- * report balances/transactions but can NEVER move money. Swap the `mock`
- * implementation below for a `relay` one that calls your Worker endpoints; the
- * onboarding UI and app code stay identical.
- *
- * Interface (all Promise-returning unless noted):
- *   provider   -> string id ("mock" | "simplefin" | ...)          [sync]
- *   label      -> human name                                       [sync]
- *   readOnly   -> true when the provider physically cannot move money [sync]
- *   startLink()                         -> { session, institutions }
- *   complete(session, { institutionId }) -> { connectionId, institution, accounts }
- *   listAccounts(connectionId)          -> [{ id, name, kind, mask, balance }]
- *   fetchTransactions(connectionId, sinceISO) -> [{ id, date, label, amount, kind, account }]
- *   disconnect(connectionId)            -> void   (revokes the token server-side)
- *
- * No bank credential ever lives on device: the mock fabricates data locally
- * (no network — nothing leaves the machine); the real relay keeps the token
- * server-side and hands this client only the read-only results.
- */
-(function (root) {
-  "use strict";
-  var wait = function (ms) { return new Promise(function (r) { setTimeout(r, ms || 500); }); };
-  var rid = function (p) { return (p || "id") + "_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); };
-
-  // A small, offline catalog of popular US institutions for the mock link
-  // screen. We ship each bank's BRAND COLOR (not a trademarked logo file) and
-  // render a colored monogram — branded-looking, zero network requests, no
-  // copyrighted assets bundled. The real provider (Plaid/SimpleFIN) returns an
-  // official `logo` + `color` per institution, which the UI renders instead
-  // (see BankConnect's avatar: it prefers institution.logo when present).
-  var INSTITUTIONS = [
-    { id: "chase", name: "Chase", color: "#117ACA", accounts: [{ name: "Chase Total Checking", kind: "bank", mask: "4021" }, { name: "Chase Savings", kind: "save", mask: "8830" }] },
-    { id: "bofa", name: "Bank of America", color: "#E31837", accounts: [{ name: "Advantage Checking", kind: "bank", mask: "1177" }] },
-    { id: "wells", name: "Wells Fargo", color: "#D71E28", accounts: [{ name: "Everyday Checking", kind: "bank", mask: "6642" }] },
-    { id: "chime", name: "Chime", color: "#1EC677", accounts: [{ name: "Chime Checking", kind: "bank", mask: "2093" }, { name: "Chime Savings", kind: "save", mask: "7781" }] },
-    { id: "capone", name: "Capital One", color: "#D03027", accounts: [{ name: "360 Checking", kind: "bank", mask: "5510" }] },
-    { id: "ally", name: "Ally Bank", color: "#6C207E", accounts: [{ name: "Ally Spending", kind: "bank", mask: "3348" }, { name: "Ally Savings", kind: "save", mask: "9902" }] },
-    { id: "fidelity", name: "Fidelity", color: "#368727", accounts: [{ name: "Fidelity Cash Mgmt", kind: "bank", mask: "1204" }, { name: "Fidelity Brokerage", kind: "save", mask: "7788" }] },
-    { id: "usbank", name: "U.S. Bank", color: "#0033A0", accounts: [{ name: "Easy Checking", kind: "bank", mask: "8817" }] }
-  ];
-
-  // The mock stands in for the relay backend. Everything here is fabricated in
-  // memory — a demo of the exact shapes the real provider returns.
-  var mock = {
-    provider: "mock",
-    label: "Demo bank (mock)",
-    readOnly: true,
-    startLink: function () {
-      return wait(300).then(function () {
-        return {
-          session: { id: rid("sess"), startedAt: Date.now() },
-          institutions: INSTITUTIONS.map(function (b) { return { id: b.id, name: b.name, color: b.color, logo: b.logo || null }; })
-        };
-      });
-    },
-    complete: function (session, cred) {
-      var inst = INSTITUTIONS.filter(function (b) { return b.id === (cred && cred.institutionId); })[0] || INSTITUTIONS[0];
-      var connectionId = rid("conn");
-      return wait(700).then(function () {
-        return {
-          connectionId: connectionId,
-          institution: { id: inst.id, name: inst.name, color: inst.color, logo: inst.logo || null },
-          accounts: inst.accounts.map(function (a, i) {
-            return { id: connectionId + "-" + i, name: a.name, kind: a.kind, mask: a.mask, balance: null };
-          })
-        };
-      });
-    },
-    listAccounts: function (connectionId) {
-      return wait(200).then(function () { return []; });
-    },
-    fetchTransactions: function (connectionId, sinceISO) {
-      // The relay returns real rows; the mock returns nothing so a simulated
-      // connection never fabricates spending/balances into the real ledger.
-      return wait(200).then(function () { return { transactions: [], balances: [] }; });
-    },
-    disconnect: function (connectionId) {
-      return wait(150).then(function () { return true; });
-    }
-  };
-
-  // Active provider. Point this at the relay implementation once the backend
-  // exists; nothing else in the app needs to change.
-  var api = mock;
-  if (typeof module !== "undefined" && module.exports) module.exports = api;
-  else { root.BankProvider = api; root.BankProviderMock = api; }
-})(typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : this));
-</script>
+<!-- demo/mock bank provider removed — production builds connect real banks only -->
 <script>/* BankProviderRelay — the REAL, SimpleFIN-backed provider (talks to the
    deployed Cloudflare relay). The app keeps the mock as the default; a
    Settings toggle (settings.bankProviderMode === "relay") switches BankConnect
@@ -4129,9 +4029,8 @@ function BankConnect({ settings, setSetting, disconnectBank }) {
   // Default = REAL Plaid. The simulated demo only appears when explicitly
   // chosen in Settings — a store customer must never connect a fake bank by
   // default and wonder why nothing imports.
-  const P = (settings.bankProviderMode === "mock") ? (window.BankProviderMock || window.BankProvider)
-    : (settings.bankProviderMode === "relay" && window.BankProviderRelay) ? window.BankProviderRelay
-    : (window.BankProviderPlaid || window.BankProviderRelay || window.BankProviderMock || window.BankProvider);
+  const P = (settings.bankProviderMode === "relay" && window.BankProviderRelay) ? window.BankProviderRelay
+    : (window.BankProviderPlaid || window.BankProviderRelay);
   const demo = !!(P && P.provider === "mock");
   const redirect = !!(P && P.mode === "redirect"); // SimpleFIN: opens the bank login, then paste a token
   const plaidLink = !!(P && P.mode === "plaid-link"); // Plaid: opens Plaid Link SDK
@@ -4236,7 +4135,7 @@ function BankConnect({ settings, setSetting, disconnectBank }) {
     avatar(l.institution, 34),
     /* @__PURE__ */ React.createElement("div", { className: "bank-main" },
       /* @__PURE__ */ React.createElement("div", { className: "bank-name" }, (l.institution && l.institution.name) || "Bank",
-        l.provider === "mock" && /* @__PURE__ */ React.createElement("span", { className: "bank-tag demo" }, "demo"),
+        
         l.readOnly && /* @__PURE__ */ React.createElement("span", { className: "bank-tag" }, "read-only")),
       /* @__PURE__ */ React.createElement("div", { className: "bank-accts" }, (l.accounts || []).map((a) => a.name + (a.mask ? " ··" + a.mask : "")).join(" · "))),
     /* @__PURE__ */ React.createElement("button", { className: "bank-x", onClick: () => disconnect(l), "aria-label": tr("bank_disconnect") + " " + ((l.institution && l.institution.name) || "bank") }, "×")));
@@ -4629,7 +4528,7 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
                 const cur = (d.settings && d.settings.bankLinks) || [];
                 const bornAt = {};
                 cur.forEach((l) => { if (l.connectionId && bornAt[l.connectionId] == null) bornAt[l.connectionId] = l.connectedAt; });
-                const out = cur.filter((l) => l.provider !== "simplefin" && l.provider !== "plaid");
+                const out = [];   // server list is authoritative; demo/mock links are gone
                 conns.forEach((c) => {
                   const groups = (c.institutions && c.institutions.length) ? c.institutions : [];
                   groups.forEach((g, i) => out.push({
@@ -4666,7 +4565,7 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
       const cur = settings.bankLinks || [];
       const bornAt = {};
       cur.forEach((l) => { if (l.connectionId && bornAt[l.connectionId] == null) bornAt[l.connectionId] = l.connectedAt; });
-      const out = cur.filter((l) => l.provider !== "simplefin" && l.provider !== "plaid");
+      const out = [];   // server list is authoritative; demo/mock links are gone
       conns.forEach((c) => {
         const groups = (c.institutions && c.institutions.length) ? c.institutions : [];
         groups.forEach((g, i) => out.push({
@@ -4845,8 +4744,15 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
       // Only spendable cash/checking counts as "In the bank". Loans/mortgages
       // are liabilities (ignore); credit cards are their own bucket; savings,
       // money-market, CD, and investment/retirement accounts pool into Savings.
+      // the live connection's own typing (worker plaidKind: credit/save/bank)
+      // beats name guessing — Plaid names every Chime account "Chime account",
+      // so names alone can't tell the Credit Builder from checking.
+      const kindByName = {};
+      (settings.bankLinks || []).forEach((l) => (l.accounts || []).forEach((ac) => { if (ac && ac.name && ac.kind) kindByName[ac.name] = ac.kind; }));
       if (!known[a]) adds[a] =
-        /\b(loan|mortgage|student|heloc|auto\s*loan)\b/i.test(a) ? "ignore"
+        kindByName[a] === "credit" ? "credit"
+        : kindByName[a] === "save" ? "save"
+        : /\b(loan|mortgage|student|heloc|auto\s*loan)\b/i.test(a) ? "ignore"
         : /credit|builder/i.test(a) ? "credit"
         : /saving|money\s*market|money\s*mkt|\bmmkt\b|\bcd\b|fidelity|invest|brokerage|\b401k?\b|\bira\b|roth|\bhsa\b|retire|vanguard/i.test(a) ? "save"
         : "bank";
@@ -4877,9 +4783,14 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
       // savings category; (3) SPEND-hints — P2P to people, ATM/withdrawals,
       // direct-debit/ACH pulls, card payments are spending even when Plaid or
       // the label says "transfer"; (4) PFC/label transfer detection.
-      const spendHint = /\b(zelle|venmo|cash ?app|paypal|apple cash|pay anyone|pay friends|western union|moneygram|atm|withdrawal|withdraw|cash out|direct debit|ach debit|dda debit|bill ?pay|credit builder|card payment|credit card|secured card)\b/i.test(r.label || "");
+      // Chime Credit Builder's internal monthly sweep ("Card Payment from
+      // Secured Account") is the card paying itself from the secured deposit —
+      // that money already left checking as funding transfers. Never spending.
+      const securedSweep = /payment from secured/i.test(r.label || "");
+      const spendHint = !securedSweep && /\b(zelle|venmo|cash ?app|paypal|apple cash|pay anyone|pay friends|western union|moneygram|atm|withdrawal|withdraw|cash out|direct debit|ach debit|dda debit|bill ?pay|credit builder|card payment|credit card|secured card)\b/i.test(r.label || "");
       const saveHint = r.kind === "spend" && /\b(round ?up|save when you get paid|auto ?save)\b/i.test(r.label || "");
       const isXfer = xv ? xv === "transfer"
+        : securedSweep ? true
         : (r.kind === "spend"
           ? (!spendHint && !saveHint && (xferPfc || /\b(transfer|xfer|to savings|to checking|internal transfer|wire transfer|fidelity|vanguard|robinhood|coinbase)\b/i.test(r.label || "")))
           : (xferPfc || /\b(transfer|xfer)\b/i.test(r.label || "")));
@@ -5129,7 +5040,7 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     const names = {};
     allLinks.filter((l) => l.connectionId === cid).forEach((l) => (l.accounts || []).forEach((a) => { if (a && a.name) names[a.name] = 1; }));
     const lastConn = allLinks.filter((l) => l.connectionId !== cid && (l.provider === "simplefin" || l.provider === "plaid")).length === 0;
-    const P = window.BankProviderRelay || window.BankProvider;
+    const P = window.BankProviderRelay;
     if (P && P.disconnect) P.disconnect(cid).catch(() => {});
     setData((d) => {
       const isBank = (e) => e && typeof e.id === "string" && e.id.indexOf("sf-") === 0;
@@ -5169,6 +5080,7 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     // "transfer": P2P payments to other people (Zelle, Venmo, Cash App,
     // Chime Pay Anyone…), cash leaving via ATM/withdrawal, and merchant
     // pulls (direct debit / ACH debit / bill pay).
+    const SECURED = /payment from secured/i;   // Chime Credit Builder internal sweep — always a transfer
     const P2P = /\b(zelle|venmo|cash ?app|paypal|apple cash|pay anyone|pay friends|western union|moneygram|atm|withdrawal|withdraw|cash out|direct debit|ach debit|dda debit|bill ?pay|credit builder|card payment|credit card|secured card)\b/i;
     // Round-ups/auto-saves count as OUT, routed to the savings category.
     const SAVE_HINT = /\b(round ?up|save when you get paid|auto ?save)\b/i;
@@ -5176,7 +5088,7 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     // (xferExempt) beat the regexes in BOTH directions.
     const XM = data.xferMap || {};
     inc.forEach((e) => { if (e && e.account && !e.isTransfer && !e.xferExempt && XM[normXfer(e.source)] !== "keep" && (XM[normXfer(e.source)] === "transfer" || IN_XFER.test(e.source || ""))) markI[e.id] = 1; });
-    txs.forEach((t) => { if (t && t.account && !t.isTransfer && !t.xferExempt && !SAVE_HINT.test(t.merchant || "") && XM[normXfer(t.merchant)] !== "keep" && (XM[normXfer(t.merchant)] === "transfer" || (OUT_XFER.test(t.merchant || "") && !P2P.test(t.merchant || "")))) markT[t.id] = 1; });
+    txs.forEach((t) => { if (t && t.account && !t.isTransfer && !t.xferExempt && !SAVE_HINT.test(t.merchant || "") && XM[normXfer(t.merchant)] !== "keep" && (SECURED.test(t.merchant || "") || XM[normXfer(t.merchant)] === "transfer" || (OUT_XFER.test(t.merchant || "") && !P2P.test(t.merchant || "")))) markT[t.id] = 1; });
     // HEAL pass — rows the OLD rules wrongly excluded: P2P/withdrawal/card
     // payments un-mark back to spending; round-ups un-mark AND route to the
     // savings category. The user's explicit "transfer" verdict still wins.
@@ -5186,7 +5098,7 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
       if (!t || !t.account || t.xferExempt) return;
       const lab = t.merchant || "";
       if (XM[normXfer(lab)] === "transfer") return;
-      const sv = SAVE_HINT.test(lab), sp = P2P.test(lab);
+      const sv = SAVE_HINT.test(lab), sp = P2P.test(lab) && !SECURED.test(lab);
       if (t.isTransfer && (sv || sp)) unmarkT[t.id] = 1;
       if (sv && savCat && t.categoryId !== savCat) recatT[t.id] = savCat;
       else if ((sv || sp) && t.isTransfer && t.categoryId == null && !recatT[t.id]) recatT[t.id] = "gen";
@@ -5588,9 +5500,15 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     setData((d) => {
       const t = (d.txns || []).find((x) => x.id === id);
       const key = t && normXfer(t.merchant);
+      // Counting a savings-bound move ("Transfer to Chime Savings", round-ups)
+      // registers it as a SET-ASIDE — money out, routed to the savings
+      // category — so it shows under Savings, not General.
+      const savC = ((d.categories || []).find((c) => c.class === "SAVING") || {}).id;
+      const savBound = t && /\b(sav(e|ing|ings)?|round ?up)\b/i.test(t.merchant || "");
+      const newCat = asSpend ? (savBound && savC ? savC : (t && t.categoryId != null ? t.categoryId : "gen")) : null;
       return {
         ...d,
-        txns: (d.txns || []).map((x) => x.id === id ? { ...x, isTransfer: asSpend ? 0 : 1, xferExempt: 1, ...(asSpend && x.categoryId == null ? { categoryId: "gen" } : {}), _m: Date.now() } : x),
+        txns: (d.txns || []).map((x) => x.id === id ? { ...x, isTransfer: asSpend ? 0 : 1, xferExempt: 1, ...(asSpend ? { categoryId: newCat } : {}), _m: Date.now() } : x),
         ...(key ? { xferMap: { ...(d.xferMap || {}), [key]: asSpend ? "keep" : "transfer" } } : {})
       };
     });
@@ -5670,24 +5588,6 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
       }
     };
     r.readAsText(file);
-  };
-  const resetSeed = () => {
-    setData((d) => {
-      const f = freshData();
-      f.settingsTs = Date.now();
-      const nonce = "-r" + Date.now().toString(36);
-      f.txns = f.txns.map((t) => ({ ...t, id: t.id + nonce }));
-      f.income = f.income.map((e) => ({ ...e, id: e.id + nonce }));
-      const oldDel = d.deleted || { txns: [], income: [] };
-      const keepAlive = ["recinc-" + CURRENT_MONTH, "recsave-" + CURRENT_MONTH];
-      const notKept = (id) => !keepAlive.some((k) => id === k || id.startsWith(k + "@"));
-      f.deleted = {
-        txns: Array.from(/* @__PURE__ */ new Set([...oldDel.txns || [], ...d.txns.map((t) => t.id)])).filter(notKept).slice(-1e3),
-        income: Array.from(/* @__PURE__ */ new Set([...oldDel.income || [], ...d.income.map((e) => e.id)])).filter(notKept).slice(-1e3)
-      };
-      return f;
-    });
-    setRev((n) => n + 1);
   };
   const updateTxn = (id, f) => {
     const cents = C.parseDollars(f.amount);
@@ -5772,7 +5672,7 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
       setView: setActView,
       openAdd: () => setSheetOpen(true)
     }
-  ), effTab === "trends" && /* @__PURE__ */ React.createElement(Trends, { ...shared, sfHist: data.sfHist || {} }), effTab === "funds" && /* @__PURE__ */ React.createElement(Funds, { ...shared }), effTab === "settings" && /* @__PURE__ */ React.createElement(Settings, { ...shared, simpleMode, data, ...{ setSetting, exportJSON, importJSON, resetSeed, syncCfg, setSyncCfg, syncInfo, runSync, makeDiag }, sfMap: data.sfMap || {}, setSfRole: (acct, role) => setData((d) => ({ ...d, sfMap: { ...d.sfMap || {}, [acct]: role } })), disconnectBank })), (effTab === "home" || effTab === "budget" || effTab === "activity") && /* @__PURE__ */ React.createElement(Fab, { openSheet: (k) => { setSheetKind(k); setSheetOpen(true); } }), sheetOpen &&/* @__PURE__ */ React.createElement(
+  ), effTab === "trends" && /* @__PURE__ */ React.createElement(Trends, { ...shared, sfHist: data.sfHist || {} }), effTab === "funds" && /* @__PURE__ */ React.createElement(Funds, { ...shared }), effTab === "settings" && /* @__PURE__ */ React.createElement(Settings, { ...shared, simpleMode, data, ...{ setSetting, exportJSON, importJSON, syncCfg, setSyncCfg, syncInfo, runSync, makeDiag }, sfMap: data.sfMap || {}, setSfRole: (acct, role) => setData((d) => ({ ...d, sfMap: { ...d.sfMap || {}, [acct]: role } })), disconnectBank })), (effTab === "home" || effTab === "budget" || effTab === "activity") && /* @__PURE__ */ React.createElement(Fab, { openSheet: (k) => { setSheetKind(k); setSheetOpen(true); } }), sheetOpen &&/* @__PURE__ */ React.createElement(
     AddSheet,
     {
       ...{ month, addTxn, addIncome, addBatch, categories, merchantMap },
@@ -6727,7 +6627,6 @@ function Settings(p) {
     data,
     exportJSON,
     importJSON,
-    resetSeed,
     rev,
     syncCfg,
     setSyncCfg,
@@ -6897,7 +6796,7 @@ function Settings(p) {
         }
       }
     ))
-  ), /* @__PURE__ */ React.createElement(Acc, { title: tr("set_banks"), cap: (settings.bankLinks || []).length ? ((settings.bankLinks.length) + " bank" + (settings.bankLinks.length === 1 ? "" : "s")) : tr("set_banks_none") }, /* @__PURE__ */ React.createElement("div", { className: "sub", style: { marginTop: 0, marginBottom: 12 } }, "Read-only connections. In My Stash can see balances and transactions — it can never move your money, and your data stays encrypted on this device."), /* @__PURE__ */ React.createElement("div", { className: "hint", style: { marginTop: 0, marginBottom: 12 } }, "Adding or removing a bank takes effect on this device right away. Your other devices catch up at the next sync — not instantly."), /* @__PURE__ */ React.createElement("div", { className: "bank-src" }, /* @__PURE__ */ React.createElement("span", null, "Connection source"), /* @__PURE__ */ React.createElement("select", { value: settings.bankProviderMode === "relay" || settings.bankProviderMode === "mock" ? settings.bankProviderMode : "plaid", onChange: (e) => setSetting("bankProviderMode", e.target.value), "aria-label": "Bank connection source" }, /* @__PURE__ */ React.createElement("option", { value: "plaid" }, "Plaid (tap & log in)"), /* @__PURE__ */ React.createElement("option", { value: "relay" }, "SimpleFIN (paste token)"), /* @__PURE__ */ React.createElement("option", { value: "mock" }, "Demo (simulated — not real)"))), /* @__PURE__ */ React.createElement(BankConnect, { settings, setSetting, disconnectBank })), /* @__PURE__ */ React.createElement(Acc, { title: "Recurring & upcoming", cap: (settings.commitments || []).length ? (settings.commitments.length + " item" + (settings.commitments.length === 1 ? "" : "s")) : "auto" }, /* @__PURE__ */ React.createElement(CommitmentsSetup, { settings, setSetting })), /* @__PURE__ */ React.createElement(Acc, { title: "App & data", cap: "language · text size" }, /* @__PURE__ */ React.createElement("div", { className: "lock-row", style: { marginTop: 0, marginBottom: 10 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 16, fontWeight: 700, letterSpacing: "-.01em", color: "var(--ink)" } }, tr("set_language")), /* @__PURE__ */ React.createElement("select", { value: settings.lang || "system", onChange: (e) => setSetting("lang", e.target.value), "aria-label": tr("set_language") }, /* @__PURE__ */ React.createElement("option", { value: "system" }, tr("set_language_system")), Object.keys(LANG_NAMES).map((code) => /* @__PURE__ */ React.createElement("option", { key: code, value: code }, LANG_NAMES[code])))), /* @__PURE__ */ React.createElement("div", { className: "lock-row", style: { marginTop: 0, marginBottom: 10 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 16, fontWeight: 700, letterSpacing: "-.01em", color: "var(--ink)" } }, "Text size"), /* @__PURE__ */ React.createElement("select", { value: String(settings.uiScale || 1), onChange: (e) => setSetting("uiScale", +e.target.value), "aria-label": "Text size" }, /* @__PURE__ */ React.createElement("option", { value: "1" }, "Default"), /* @__PURE__ */ React.createElement("option", { value: "1.15" }, "Large"), /* @__PURE__ */ React.createElement("option", { value: "1.3" }, "Largest"))), /* @__PURE__ */ React.createElement(
+  ), /* @__PURE__ */ React.createElement(Acc, { title: tr("set_banks"), cap: (settings.bankLinks || []).length ? ((settings.bankLinks.length) + " bank" + (settings.bankLinks.length === 1 ? "" : "s")) : tr("set_banks_none") }, /* @__PURE__ */ React.createElement("div", { className: "sub", style: { marginTop: 0, marginBottom: 12 } }, "Read-only connections. In My Stash can see balances and transactions — it can never move your money, and your data stays encrypted on this device."), /* @__PURE__ */ React.createElement("div", { className: "hint", style: { marginTop: 0, marginBottom: 12 } }, "Adding or removing a bank takes effect on this device right away. Your other devices catch up at the next sync — not instantly."), /* @__PURE__ */ React.createElement("div", { className: "bank-src" }, /* @__PURE__ */ React.createElement("span", null, "Connection source"), /* @__PURE__ */ React.createElement("select", { value: settings.bankProviderMode === "relay" ? "relay" : "plaid", onChange: (e) => setSetting("bankProviderMode", e.target.value), "aria-label": "Bank connection source" }, /* @__PURE__ */ React.createElement("option", { value: "plaid" }, "Plaid (tap & log in)"), /* @__PURE__ */ React.createElement("option", { value: "relay" }, "SimpleFIN (paste token)"))), /* @__PURE__ */ React.createElement(BankConnect, { settings, setSetting, disconnectBank })), /* @__PURE__ */ React.createElement(Acc, { title: "Recurring & upcoming", cap: (settings.commitments || []).length ? (settings.commitments.length + " item" + (settings.commitments.length === 1 ? "" : "s")) : "auto" }, /* @__PURE__ */ React.createElement(CommitmentsSetup, { settings, setSetting })), /* @__PURE__ */ React.createElement(Acc, { title: "App & data", cap: "language · text size" }, /* @__PURE__ */ React.createElement("div", { className: "lock-row", style: { marginTop: 0, marginBottom: 10 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 16, fontWeight: 700, letterSpacing: "-.01em", color: "var(--ink)" } }, tr("set_language")), /* @__PURE__ */ React.createElement("select", { value: settings.lang || "system", onChange: (e) => setSetting("lang", e.target.value), "aria-label": tr("set_language") }, /* @__PURE__ */ React.createElement("option", { value: "system" }, tr("set_language_system")), Object.keys(LANG_NAMES).map((code) => /* @__PURE__ */ React.createElement("option", { key: code, value: code }, LANG_NAMES[code])))), /* @__PURE__ */ React.createElement("div", { className: "lock-row", style: { marginTop: 0, marginBottom: 10 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 16, fontWeight: 700, letterSpacing: "-.01em", color: "var(--ink)" } }, "Text size"), /* @__PURE__ */ React.createElement("select", { value: String(settings.uiScale || 1), onChange: (e) => setSetting("uiScale", +e.target.value), "aria-label": "Text size" }, /* @__PURE__ */ React.createElement("option", { value: "1" }, "Default"), /* @__PURE__ */ React.createElement("option", { value: "1.15" }, "Large"), /* @__PURE__ */ React.createElement("option", { value: "1.3" }, "Largest"))), /* @__PURE__ */ React.createElement(
     Acc,
     { title: "Sync across devices", cap: "automatic" },
     /* @__PURE__ */ React.createElement("div", { className: "hint", style: { marginTop: 0 } }, "Your devices stay in sync automatically in the background — nothing to set up. The synced copy is encrypted on this device before it leaves, so the server only ever holds ciphertext it cannot read.")
