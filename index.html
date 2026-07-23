@@ -587,6 +587,14 @@ body{background:linear-gradient(180deg,#16413a 0px,#10302b 300px,#0a1614 680px) 
   100%{transform:translateY(0) scale(1) rotate(720deg);opacity:1}}
 .til-pay{font-size:13px;color:var(--ink2);text-align:center;margin:8px 0 2px}
 .til-pay b{color:var(--ink);font-weight:700}
+/* Home welcome: time-of-day greeting with the brand pocket, animated in */
+.home-hello{order:-2;display:flex;align-items:center;gap:12px;margin:2px 2px 14px;animation:hello-in .55s cubic-bezier(.22,.61,.36,1) both}
+.home-hello .hh-hi{font-size:22px;font-weight:800;letter-spacing:-.02em;color:var(--ink);line-height:1.15}
+.home-hello .hh-sub{font-size:13.5px;color:var(--ink2);margin-top:2px}
+.home-hello > svg{flex:none;animation:hello-pop .7s cubic-bezier(.34,1.56,.64,1) both .12s}
+@keyframes hello-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+@keyframes hello-pop{from{opacity:0;transform:scale(.72) rotate(-8deg)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion: reduce){.home-hello,.home-hello > svg{animation:none}}
 /* payday pocket: the pay-period buffer, promoted to its own card — it's the
    single most actionable number on the screen */
 .paypocket{display:flex;align-items:center;justify-content:space-between;gap:14px}
@@ -677,7 +685,9 @@ body{background:linear-gradient(180deg,#16413a 0px,#10302b 300px,#0a1614 680px) 
 .lock-row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:10px;font-size:14px;color:var(--ink)}
 .lock-row select{border:1px solid var(--ring);border-radius:9px;padding:8px 10px;background:var(--page);color:var(--ink);font-size:14px}
 .lock-setup{display:flex;flex-direction:column;gap:10px;margin-top:2px}
-.lock-setup .lk-input{width:100%;border:1px solid var(--grid);border-radius:10px;padding:12px;background:var(--page);color:var(--ink);font-size:15px;-webkit-text-security:disc}
+.lk-input{width:100%;border:1px solid var(--grid);border-radius:12px;padding:13px;background:var(--page);color:var(--ink);font-size:16px;text-align:center;letter-spacing:.35em;-webkit-text-security:disc}
+.lk-input::placeholder{letter-spacing:normal;color:var(--muted)}
+.lk-input:focus{outline:none;border-color:var(--accent)}
 .lock-setup .btn{width:100%;justify-content:center}
 .cm-list{display:flex;flex-direction:column;gap:7px;margin-bottom:12px}
 .cm-row{display:flex;align-items:center;gap:10px;padding:9px 8px 9px 12px;border:1px solid var(--grid);border-radius:10px;background:var(--page)}
@@ -3112,6 +3122,7 @@ const TODAY = todayISO();
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden && todayISO() !== TODAY) location.reload();
 });
+const BUILD_ID = "2026-07-23.9";
 const CURRENT_MONTH = TODAY.slice(0, 7);
 
 /* ---- i18n: follows the device language by default; the core experience is
@@ -5007,7 +5018,7 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
   const makeDiag = () => {
     const m = CURRENT_MONTH;
     const L = [];
-    L.push("IN MY STASH DIAGNOSTIC · " + m + " · " + new Date().toISOString());
+    L.push("IN MY STASH DIAGNOSTIC · build " + BUILD_ID + " · " + m + " · " + new Date().toISOString());
     const links = (settings.bankLinks || []).map((l) => l.provider + ":" + ((l.accounts || []).map((a) => a.name + (a.mask ? "··" + a.mask : "")).join("/")));
     L.push("connections: " + (links.join(" | ") || "none"));
     L.push("roles: " + JSON.stringify(data.sfMap || {}));
@@ -5088,7 +5099,10 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     // (xferExempt) beat the regexes in BOTH directions.
     const XM = data.xferMap || {};
     inc.forEach((e) => { if (e && e.account && !e.isTransfer && !e.xferExempt && XM[normXfer(e.source)] !== "keep" && (XM[normXfer(e.source)] === "transfer" || IN_XFER.test(e.source || ""))) markI[e.id] = 1; });
-    txs.forEach((t) => { if (t && t.account && !t.isTransfer && !t.xferExempt && !SAVE_HINT.test(t.merchant || "") && XM[normXfer(t.merchant)] !== "keep" && (SECURED.test(t.merchant || "") || XM[normXfer(t.merchant)] === "transfer" || (OUT_XFER.test(t.merchant || "") && !P2P.test(t.merchant || "")))) markT[t.id] = 1; });
+    // The secured sweep is ABSOLUTE — it is never spending, and an accidental
+    // "Count it" pin (or a learned keep) must not resurrect it on any device.
+    txs.forEach((t) => { if (t && t.account && !t.isTransfer && SECURED.test(t.merchant || "")) markT[t.id] = 1; });
+    txs.forEach((t) => { if (t && t.account && !t.isTransfer && !t.xferExempt && !SECURED.test(t.merchant || "") && !SAVE_HINT.test(t.merchant || "") && XM[normXfer(t.merchant)] !== "keep" && (XM[normXfer(t.merchant)] === "transfer" || (OUT_XFER.test(t.merchant || "") && !P2P.test(t.merchant || "")))) markT[t.id] = 1; });
     // HEAL pass — rows the OLD rules wrongly excluded: P2P/withdrawal/card
     // payments un-mark back to spending; round-ups un-mark AND route to the
     // savings category. The user's explicit "transfer" verdict still wins.
@@ -5115,8 +5129,9 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     if (!Object.keys(markT).length && !Object.keys(markI).length && !Object.keys(unmarkT).length && !Object.keys(recatT).length) return;
     setData((d) => ({
       ...d,
+      xferMap: (() => { const m = { ...(d.xferMap || {}) }; Object.keys(m).forEach((k) => { if (SECURED.test(k) && m[k] === "keep") delete m[k]; }); return m; })(),
       txns: d.txns.map((t) => {
-        if (markT[t.id]) return { ...t, isTransfer: 1, categoryId: null, _m: Date.now() };
+        if (markT[t.id]) return { ...t, isTransfer: 1, categoryId: null, xferExempt: 0, _m: Date.now() };
         if (unmarkT[t.id] || recatT[t.id]) return { ...t, ...(unmarkT[t.id] ? { isTransfer: 0 } : {}), ...(recatT[t.id] ? { categoryId: recatT[t.id] } : {}), _m: Date.now() };
         return t;
       }),
@@ -5988,7 +6003,13 @@ function SimpleHome(p) {
   // spending eats the income (empty + red once overspent)
   const savingsLevel = (settings.savingsGoal || 0) > 0 ? savedTotal / settings.savingsGoal : savedTotal > 0 ? 0.55 : 0;
   const leftLevel = monthIncomeC > 0 ? monthNet / monthIncomeC : 0;
-  return /* @__PURE__ */ React.createElement("div", { className: "bankish" }, false && /* @__PURE__ */ React.createElement(Swiper, { labels: ["In the bank", "Left over", "On pace"] }, /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "In the bank"), availableNow != null ? /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement("div", { className: "bankish" },
+  /* @__PURE__ */ React.createElement("div", { className: "home-hello" },
+    /* @__PURE__ */ React.createElement(PocketMark, { size: 40 }),
+    /* @__PURE__ */ React.createElement("div", null,
+      /* @__PURE__ */ React.createElement("div", { className: "hh-hi" }, (function(){ var h = new Date().getHours(); return h < 12 ? "Good morning." : h < 17 ? "Good afternoon." : "Good evening."; })()),
+      /* @__PURE__ */ React.createElement("div", { className: "hh-sub" }, tr("ask_ghost"), " ;)"))),
+  false && /* @__PURE__ */ React.createElement(Swiper, { labels: ["In the bank", "Left over", "On pace"] }, /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "In the bank"), availableNow != null ? /* @__PURE__ */ React.createElement(
     AnimatedMoneySplit,
     {
       cents: availableNow,
@@ -6038,7 +6059,7 @@ function SimpleHome(p) {
     b.label
   ))), cents != null && cents > 0 && !bucket && /* @__PURE__ */ React.createElement("div", { className: "hint", style: { textAlign: "center", marginTop: 8 } }, "Pick the category that fits — essentials get more slack, fun gets less."), reservedC > 0 && !v && /* @__PURE__ */ React.createElement("div", { className: "hint", style: { textAlign: "center", marginTop: 8 } }, money(reservedC), " held back for bills due later this month."), v && monthNet > 0 && cents > 0 && /* @__PURE__ */ React.createElement("div", { className: "impact" }, /* @__PURE__ */ React.createElement("div", { className: "meter " + (v.verdict === "RED" ? "crit-track" : v.verdict === "AMBER" ? "warn-track" : "") }, /* @__PURE__ */ React.createElement("i", { style: { transform: "scaleX(" + Math.max(0, Math.min(1, v.leftAfter / monthNet)).toFixed(4) + ")" } })), /* @__PURE__ */ React.createElement("div", { className: "impact-cap" }, v.leftAfter >= 0 ? money(v.leftAfter) + " left this month after this" : money(-v.leftAfter) + " over for the month")), v && (v.verdict !== "RED" || bucket === "emergency" || bucket === "bills") && /* @__PURE__ */ React.createElement("div", { className: "verdict-stage", key: "stage-" + v.verdict + "-" + v.reason }, v.verdict === "RED" ? /* @__PURE__ */ React.createElement(StashAnim, null) : v.verdict === "GREEN" ? /* @__PURE__ */ React.createElement(SwipeAnim, null) : /* @__PURE__ */ React.createElement(CoinAnim, null)), v && /* @__PURE__ */ React.createElement("div", { key: "vd-" + v.verdict, className: "verdict " + v.verdict.toLowerCase(), role: "status" }, /* @__PURE__ */ React.createElement("span", { className: "v-ic" }, copy.ic), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("b", null, copy.head), /* @__PURE__ */ React.createElement("span", { className: "v-sub" }, copy.sub))), v && /* @__PURE__ */ React.createElement("div", { className: "btn-row", style: { justifyContent: "center", marginTop: 10 } },
     (v.verdict === "GREEN" || v.verdict === "AMBER") && /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: logAsk }, "Log it"),
-    (v.verdict === "RED" || v.verdict === "AMBER") && /* @__PURE__ */ React.createElement("button", { className: "btn " + (v.verdict === "RED" ? "primary" : "quiet"), onClick: stashAsk }, "Stash it instead")), false, !v &&/* @__PURE__ */ React.createElement("div", { className: "pocket-brand" }, /* @__PURE__ */ React.createElement(PocketMark, { size: 34 }), /* @__PURE__ */ React.createElement("div", { className: "pocket-tag" }, /* @__PURE__ */ React.createElement(TypeOn, { text: tr("ask_ghost") })))), false && /* @__PURE__ */ React.createElement("div", { className: "tilerow jar-center" }, /* @__PURE__ */ React.createElement("div", { className: "minitile" }, /* @__PURE__ */ React.createElement("div", { className: "mt-label" }, "Saved up"), /* @__PURE__ */ React.createElement(AnimatedFmt0, { className: "mt-val", cents: savedTotal })), /* @__PURE__ */ React.createElement(Jar, { level: savingsLevel, size: 46, tid: "saved" }), /* @__PURE__ */ React.createElement("div", { className: "minitile" }, /* @__PURE__ */ React.createElement("div", { className: "mt-label" }, "Safety net"), /* @__PURE__ */ React.createElement("div", { className: "mt-val" }, runway === Infinity ? "\u2014" : runway.toFixed(1) + "mo"))), dataMonths.length > 1 ? null : false ? /* @__PURE__ */ React.createElement("section", { className: "card center" }, /* @__PURE__ */ React.createElement("div", { className: "empty" }, /* @__PURE__ */ React.createElement("span", { className: "e-ic" }, "\u{1F4B5}"), "Tap ", /* @__PURE__ */ React.createElement("b", null, "+"), " and log your first deposit.")) : null);
+    (v.verdict === "RED" || v.verdict === "AMBER") && /* @__PURE__ */ React.createElement("button", { className: "btn " + (v.verdict === "RED" ? "primary" : "quiet"), onClick: stashAsk }, "Stash it instead")), false), false && /* @__PURE__ */ React.createElement("div", { className: "tilerow jar-center" }, /* @__PURE__ */ React.createElement("div", { className: "minitile" }, /* @__PURE__ */ React.createElement("div", { className: "mt-label" }, "Saved up"), /* @__PURE__ */ React.createElement(AnimatedFmt0, { className: "mt-val", cents: savedTotal })), /* @__PURE__ */ React.createElement(Jar, { level: savingsLevel, size: 46, tid: "saved" }), /* @__PURE__ */ React.createElement("div", { className: "minitile" }, /* @__PURE__ */ React.createElement("div", { className: "mt-label" }, "Safety net"), /* @__PURE__ */ React.createElement("div", { className: "mt-val" }, runway === Infinity ? "\u2014" : runway.toFixed(1) + "mo"))), dataMonths.length > 1 ? null : false ? /* @__PURE__ */ React.createElement("section", { className: "card center" }, /* @__PURE__ */ React.createElement("div", { className: "empty" }, /* @__PURE__ */ React.createElement("span", { className: "e-ic" }, "\u{1F4B5}"), "Tap ", /* @__PURE__ */ React.createElement("b", null, "+"), " and log your first deposit.")) : null);
 }
 function EnvelopeRow({ r, compact, onTap }) {
   const pct = r.planned > 0 ? r.spent / r.planned : r.spent > 0 ? 1 : 0;
@@ -6796,7 +6817,7 @@ function Settings(p) {
         }
       }
     ))
-  ), /* @__PURE__ */ React.createElement(Acc, { title: tr("set_banks"), cap: (settings.bankLinks || []).length ? ((settings.bankLinks.length) + " bank" + (settings.bankLinks.length === 1 ? "" : "s")) : tr("set_banks_none") }, /* @__PURE__ */ React.createElement("div", { className: "sub", style: { marginTop: 0, marginBottom: 12 } }, "Read-only connections. In My Stash can see balances and transactions — it can never move your money, and your data stays encrypted on this device."), /* @__PURE__ */ React.createElement("div", { className: "hint", style: { marginTop: 0, marginBottom: 12 } }, "Adding or removing a bank takes effect on this device right away. Your other devices catch up at the next sync — not instantly."), /* @__PURE__ */ React.createElement("div", { className: "bank-src" }, /* @__PURE__ */ React.createElement("span", null, "Connection source"), /* @__PURE__ */ React.createElement("select", { value: settings.bankProviderMode === "relay" ? "relay" : "plaid", onChange: (e) => setSetting("bankProviderMode", e.target.value), "aria-label": "Bank connection source" }, /* @__PURE__ */ React.createElement("option", { value: "plaid" }, "Plaid (tap & log in)"), /* @__PURE__ */ React.createElement("option", { value: "relay" }, "SimpleFIN (paste token)"))), /* @__PURE__ */ React.createElement(BankConnect, { settings, setSetting, disconnectBank })), /* @__PURE__ */ React.createElement(Acc, { title: "Recurring & upcoming", cap: (settings.commitments || []).length ? (settings.commitments.length + " item" + (settings.commitments.length === 1 ? "" : "s")) : "auto" }, /* @__PURE__ */ React.createElement(CommitmentsSetup, { settings, setSetting })), /* @__PURE__ */ React.createElement(Acc, { title: "App & data", cap: "language · text size" }, /* @__PURE__ */ React.createElement("div", { className: "lock-row", style: { marginTop: 0, marginBottom: 10 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 16, fontWeight: 700, letterSpacing: "-.01em", color: "var(--ink)" } }, tr("set_language")), /* @__PURE__ */ React.createElement("select", { value: settings.lang || "system", onChange: (e) => setSetting("lang", e.target.value), "aria-label": tr("set_language") }, /* @__PURE__ */ React.createElement("option", { value: "system" }, tr("set_language_system")), Object.keys(LANG_NAMES).map((code) => /* @__PURE__ */ React.createElement("option", { key: code, value: code }, LANG_NAMES[code])))), /* @__PURE__ */ React.createElement("div", { className: "lock-row", style: { marginTop: 0, marginBottom: 10 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 16, fontWeight: 700, letterSpacing: "-.01em", color: "var(--ink)" } }, "Text size"), /* @__PURE__ */ React.createElement("select", { value: String(settings.uiScale || 1), onChange: (e) => setSetting("uiScale", +e.target.value), "aria-label": "Text size" }, /* @__PURE__ */ React.createElement("option", { value: "1" }, "Default"), /* @__PURE__ */ React.createElement("option", { value: "1.15" }, "Large"), /* @__PURE__ */ React.createElement("option", { value: "1.3" }, "Largest"))), /* @__PURE__ */ React.createElement(
+  ), /* @__PURE__ */ React.createElement(Acc, { title: tr("set_banks"), cap: (settings.bankLinks || []).length ? ((settings.bankLinks.length) + " bank" + (settings.bankLinks.length === 1 ? "" : "s")) : tr("set_banks_none") }, /* @__PURE__ */ React.createElement("div", { className: "sub", style: { marginTop: 0, marginBottom: 12 } }, "Read-only connections. In My Stash can see balances and transactions — it can never move your money, and your data stays encrypted on this device."), /* @__PURE__ */ React.createElement("div", { className: "hint", style: { marginTop: 0, marginBottom: 12 } }, "Adding or removing a bank takes effect on this device right away. Your other devices catch up at the next sync — not instantly."), /* @__PURE__ */ React.createElement("div", { className: "bank-src" }, /* @__PURE__ */ React.createElement("span", null, "Connection source"), /* @__PURE__ */ React.createElement("select", { value: settings.bankProviderMode === "relay" ? "relay" : "plaid", onChange: (e) => setSetting("bankProviderMode", e.target.value), "aria-label": "Bank connection source" }, /* @__PURE__ */ React.createElement("option", { value: "plaid" }, "Plaid (tap & log in)"), /* @__PURE__ */ React.createElement("option", { value: "relay" }, "SimpleFIN (paste token)"))), /* @__PURE__ */ React.createElement(BankConnect, { settings, setSetting, disconnectBank })), /* @__PURE__ */ React.createElement(Acc, { title: "Recurring & upcoming", cap: (settings.commitments || []).length ? (settings.commitments.length + " item" + (settings.commitments.length === 1 ? "" : "s")) : "auto" }, /* @__PURE__ */ React.createElement(CommitmentsSetup, { settings, setSetting })), /* @__PURE__ */ React.createElement(Acc, { title: "App & data", cap: "build " + BUILD_ID }, /* @__PURE__ */ React.createElement("div", { className: "lock-row", style: { marginTop: 0, marginBottom: 10 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 16, fontWeight: 700, letterSpacing: "-.01em", color: "var(--ink)" } }, tr("set_language")), /* @__PURE__ */ React.createElement("select", { value: settings.lang || "system", onChange: (e) => setSetting("lang", e.target.value), "aria-label": tr("set_language") }, /* @__PURE__ */ React.createElement("option", { value: "system" }, tr("set_language_system")), Object.keys(LANG_NAMES).map((code) => /* @__PURE__ */ React.createElement("option", { key: code, value: code }, LANG_NAMES[code])))), /* @__PURE__ */ React.createElement("div", { className: "lock-row", style: { marginTop: 0, marginBottom: 10 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 16, fontWeight: 700, letterSpacing: "-.01em", color: "var(--ink)" } }, "Text size"), /* @__PURE__ */ React.createElement("select", { value: String(settings.uiScale || 1), onChange: (e) => setSetting("uiScale", +e.target.value), "aria-label": "Text size" }, /* @__PURE__ */ React.createElement("option", { value: "1" }, "Default"), /* @__PURE__ */ React.createElement("option", { value: "1.15" }, "Large"), /* @__PURE__ */ React.createElement("option", { value: "1.3" }, "Largest"))), /* @__PURE__ */ React.createElement(
     Acc,
     { title: "Sync across devices", cap: "automatic" },
     /* @__PURE__ */ React.createElement("div", { className: "hint", style: { marginTop: 0 } }, "Your devices stay in sync automatically in the background — nothing to set up. The synced copy is encrypted on this device before it leaves, so the server only ever holds ciphertext it cannot read.")
