@@ -3122,7 +3122,7 @@ const TODAY = todayISO();
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden && todayISO() !== TODAY) location.reload();
 });
-const BUILD_ID = "2026-07-23.14";
+const BUILD_ID = "2026-07-23.15";
 const CURRENT_MONTH = TODAY.slice(0, 7);
 
 /* ---- i18n: follows the device language by default; the core experience is
@@ -5082,20 +5082,29 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
   // deleted by hand (the secured sweep) re-imports as an excluded transfer
   // and can be re-deleted once.
   useEffect(() => {
-    if (data.migRecov1) return;
+    // Race-proof + re-armable: the erased state can RECUR (another device's
+    // snapshot unions the poisoned tombstones back in), so this never
+    // permanently disarms — it fires whenever the erased signature appears,
+    // rate-limited so two out-of-date devices can't thrash. No flag is set
+    // on healthy skips (the old design disarmed forever if a freshly-fetched
+    // row happened to exist at first check — the race that kept one device
+    // empty).
+    const links = (settings.bankLinks || []).some((l) => l.provider === "simplefin" || l.provider === "plaid");
+    if (!links) return;
     const hasBankRows = (data.txns || []).some((e) => e && e.account) || (data.income || []).some((e) => e && e.account);
     const del = data.deleted || {};
     const plainSf = (l) => (l || []).filter((x) => String(x).indexOf("sf-") === 0 && String(x).indexOf("@") < 0);
     const nT = plainSf(del.txns).length, nI = plainSf(del.income).length;
-    if (hasBankRows || nT + nI < 20) { if (!data.migRecov1) setData((d) => ({ ...d, migRecov1: 1 })); return; }
+    if (hasBankRows || nT + nI < 20) return;                      // healthy or not the erased signature — check again next change
+    if (Date.now() - (data.migRecovAt || 0) < 90e3) return;        // rate limit re-performs
     try { localStorage.removeItem("stash.relay.lastSync"); localStorage.removeItem("stash.relay.lastSyncSig"); } catch (e) {}
     setData((d) => {
       const keep = (l) => (l || []).filter((x) => !(String(x).indexOf("sf-") === 0 && String(x).indexOf("@") < 0));
       const sfSeen = {};
       Object.keys(d.sfSeen || {}).forEach((k) => { if (k.indexOf("sf-") !== 0) sfSeen[k] = d.sfSeen[k]; });
-      return { ...d, migRecov1: 1, sfSeen, deleted: { txns: keep((d.deleted || {}).txns), income: keep((d.deleted || {}).income) } };
+      return { ...d, migRecovAt: Date.now(), sfSeen, deleted: { txns: keep((d.deleted || {}).txns), income: keep((d.deleted || {}).income) } };
     });
-  }, [data.migRecov1, data.txns, data.income, setData]);
+  }, [settings.bankLinks, data.migRecovAt, data.txns, data.income, data.deleted, setData]);
   // Transfer pairing: money moved between YOUR OWN accounts is neither income
   // nor spending. A bank-tagged deposit that matches a bank-tagged withdrawal
   // from a DIFFERENT account (same amount, within 3 days) is a self-transfer —
