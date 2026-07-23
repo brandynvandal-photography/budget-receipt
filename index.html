@@ -4021,6 +4021,18 @@ function LockRequired({ data, setSetting, onRemoveBanks }) {
    non-sensitive connection metadata in settings.bankLinks — institution name,
    masked accounts, connectedAt — never a token or credential. Reused in
    onboarding and in Settings. ---- */
+// Plaid Link SDK, loaded on demand (module scope: shared by BankConnect and
+// the OAuth-return resume in Main).
+function loadPlaidSdk() {
+  return new Promise((resolve, reject) => {
+    if (window.Plaid) return resolve(window.Plaid);
+    const s = document.createElement("script");
+    s.src = "https://cdn.plaid.com/link/v2/stable/link-initialize.js";
+    s.onload = () => resolve(window.Plaid);
+    s.onerror = () => reject(new Error("plaid_sdk"));
+    document.head.appendChild(s);
+  });
+}
 function BankConnect({ settings, setSetting, disconnectBank }) {
   // The live default is the mock; a Settings toggle (bankProviderMode) switches
   // to the real SimpleFIN relay. The "mock" SIMULATES connections (no bank
@@ -4078,14 +4090,6 @@ function BankConnect({ settings, setSetting, disconnectBank }) {
     setTimeout(() => setJustAdded(null), 2200);
     setPhase("idle"); setSession(null); setInsts([]); setSetupToken("");
   };
-  const loadPlaidSdk = () => new Promise((resolve, reject) => {
-    if (window.Plaid) return resolve(window.Plaid);
-    const s = document.createElement("script");
-    s.src = "https://cdn.plaid.com/link/v2/stable/link-initialize.js";
-    s.onload = () => resolve(window.Plaid);
-    s.onerror = () => reject(new Error("plaid_sdk"));
-    document.head.appendChild(s);
-  });
   const start = () => {
     if (!P) { setErr("Bank connections aren't available right now."); setPhase("error"); return; }
     setErr(""); setPhase("working");
@@ -4094,6 +4098,9 @@ function BankConnect({ settings, setSetting, disconnectBank }) {
         // Plaid: open Plaid Link (their SDK, loaded on demand). On success we
         // get a public token to exchange server-side.
         return loadPlaidSdk().then((Plaid) => {
+          // OAuth banks leave the page mid-flow; keep the link token so the
+          // return trip (oauth_state_id) can resume with the SAME token.
+          try { sessionStorage.setItem("stash.plaid.linkToken", r.linkToken); } catch (e) {}
           const handler = Plaid.create({
             token: r.linkToken,
             onSuccess: (public_token, metadata) => {
@@ -4504,6 +4511,55 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     if (window.__stashInstallRelayKeys) window.__stashInstallRelayKeys(changed ? next : stored, lockOn);
     if (changed) setSetting("relayKeys", next);
   }, [settings.relayKeys, settings.bankLinks, settings.lock && settings.lock.enabled]);
+  // Plaid OAuth return: an OAuth bank (Chase, Capital One…) bounced the whole
+  // page to the bank's site and back with ?oauth_state_id=…. Resume Link with
+  // the SAME link token plus the redirect URL, finish the exchange, then
+  // rebuild the card list from the relay. Lives in Main (not BankConnect) so
+  // the return trip works no matter which screen the app lands on.
+  useEffect(() => {
+    let oauth = false;
+    try { oauth = new URLSearchParams(window.location.search).has("oauth_state_id"); } catch (e) {}
+    let tok = null;
+    try { tok = sessionStorage.getItem("stash.plaid.linkToken"); } catch (e) {}
+    const P = window.BankProviderPlaid;
+    if (!oauth || !tok || !P) return;
+    const done = () => {
+      try { sessionStorage.removeItem("stash.plaid.linkToken"); } catch (e) {}
+      try { history.replaceState(null, "", window.location.pathname); } catch (e) {}
+    };
+    loadPlaidSdk().then((Plaid) => {
+      const h = Plaid.create({
+        token: tok,
+        receivedRedirectUri: window.location.href,
+        onSuccess: (public_token, metadata) => {
+          P.complete({}, { publicToken: public_token, institution: metadata && metadata.institution })
+            .then(() => P.listAccounts())
+            .then((conns) => {
+              if (!Array.isArray(conns)) return;
+              setData((d) => {
+                const cur = (d.settings && d.settings.bankLinks) || [];
+                const bornAt = {};
+                cur.forEach((l) => { if (l.connectionId && bornAt[l.connectionId] == null) bornAt[l.connectionId] = l.connectedAt; });
+                const out = cur.filter((l) => l.provider !== "simplefin" && l.provider !== "plaid");
+                conns.forEach((c) => {
+                  const groups = (c.institutions && c.institutions.length) ? c.institutions : [];
+                  groups.forEach((g, i) => out.push({
+                    id: c.connectionId + (groups.length > 1 ? "::" + i : ""), connectionId: c.connectionId,
+                    provider: c.provider || "plaid", readOnly: c.readOnly !== false,
+                    institution: g.institution, accounts: g.accounts || [], connectedAt: bornAt[c.connectionId] || Date.now(),
+                  }));
+                });
+                return { ...d, settings: { ...d.settings, bankLinks: out } };
+              });
+            })
+            .catch(() => {})
+            .then(done);
+        },
+        onExit: () => done(),
+      });
+      h.open();
+    }).catch(done);
+  }, []);
   // Reconcile connections against the relay: the server (KV) is the source of
   // truth for which relay banks are linked. On load we rebuild the simplefin/
   // plaid cards to exactly match the server list — ADDS ones missing locally
