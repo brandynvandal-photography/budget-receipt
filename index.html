@@ -3122,7 +3122,7 @@ const TODAY = todayISO();
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden && todayISO() !== TODAY) location.reload();
 });
-const BUILD_ID = "2026-07-23.13";
+const BUILD_ID = "2026-07-23.14";
 const CURRENT_MONTH = TODAY.slice(0, 7);
 
 /* ---- i18n: follows the device language by default; the core experience is
@@ -5074,6 +5074,28 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     });
     setSfBal((prev) => lastConn ? [] : (prev || []).filter((b) => !(b && names[b.account])));
   };
+  // RECOVERY (one-shot): an earlier provider-switch purge erased the whole
+  // bank history and left merge-proof tombstones that killed every re-import.
+  // If the ledger has NO bank-tagged rows but dozens of plain sf- tombstones,
+  // clear them (user's own timestamped deletes are kept), clear seen-markers,
+  // and force an immediate sync so the feed repopulates. The one row the user
+  // deleted by hand (the secured sweep) re-imports as an excluded transfer
+  // and can be re-deleted once.
+  useEffect(() => {
+    if (data.migRecov1) return;
+    const hasBankRows = (data.txns || []).some((e) => e && e.account) || (data.income || []).some((e) => e && e.account);
+    const del = data.deleted || {};
+    const plainSf = (l) => (l || []).filter((x) => String(x).indexOf("sf-") === 0 && String(x).indexOf("@") < 0);
+    const nT = plainSf(del.txns).length, nI = plainSf(del.income).length;
+    if (hasBankRows || nT + nI < 20) { if (!data.migRecov1) setData((d) => ({ ...d, migRecov1: 1 })); return; }
+    try { localStorage.removeItem("stash.relay.lastSync"); localStorage.removeItem("stash.relay.lastSyncSig"); } catch (e) {}
+    setData((d) => {
+      const keep = (l) => (l || []).filter((x) => !(String(x).indexOf("sf-") === 0 && String(x).indexOf("@") < 0));
+      const sfSeen = {};
+      Object.keys(d.sfSeen || {}).forEach((k) => { if (k.indexOf("sf-") !== 0) sfSeen[k] = d.sfSeen[k]; });
+      return { ...d, migRecov1: 1, sfSeen, deleted: { txns: keep((d.deleted || {}).txns), income: keep((d.deleted || {}).income) } };
+    });
+  }, [data.migRecov1, data.txns, data.income, setData]);
   // Transfer pairing: money moved between YOUR OWN accounts is neither income
   // nor spending. A bank-tagged deposit that matches a bank-tagged withdrawal
   // from a DIFFERENT account (same amount, within 3 days) is a self-transfer —
@@ -5143,7 +5165,7 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
         if (unmarkT[t.id] || recatT[t.id]) return { ...t, ...(unmarkT[t.id] ? { isTransfer: 0 } : {}), ...(recatT[t.id] ? { categoryId: recatT[t.id] } : {}), _m: Date.now() };
         return t;
       }),
-      income: d.income.map((e) => markI[e.id] ? { ...e, isTransfer: 1 } : e)
+      income: d.income.map((e) => markI[e.id] ? { ...e, isTransfer: 1, _m: Date.now() } : e)
     }));
   }, [data.txns, data.income, data.xferMap, setData]);
   // Content dedupe: the SAME real-world transaction imported twice under
@@ -5280,7 +5302,16 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     // account names in bankLinks are current, so stale-name rows can go.
     const haveFeed = !!(sfBal && sfBal.length) || serverSeen;
     const balOnly = (a) => { const r = (data.sfMap || {})[a]; return r === "credit" || r === "save" || r === "ignore"; };
-    const stale = (e) => e && e.account && (balOnly(e.account) || (haveFeed && !live[e.account]));
+    // Wholesale-rename guard: a provider switch renames EVERY account (Plaid
+    // "Chime account" vs SimpleFIN "Chime account (6921)"). If not a single
+    // bank-tagged row matches a live name, this is a rename, not staleness —
+    // purging would erase the user's entire history (it did, once). Skip the
+    // liveness purge entirely in that case; content-dedupe reconciles the
+    // re-imported feed against history instead.
+    const anyLiveRow = (data.txns || []).some((e) => e && e.account && live[e.account]) || (data.income || []).some((e) => e && e.account && live[e.account]);
+    const hasBankRows = (data.txns || []).some((e) => e && e.account) || (data.income || []).some((e) => e && e.account);
+    const wholesaleRename = hasBankRows && !anyLiveRow;
+    const stale = (e) => e && e.account && (balOnly(e.account) || (haveFeed && !wholesaleRename && !live[e.account]));
     const staleFeed = (e) => haveFeed && e && e.account && !live[e.account];   // feeds keep balance-only rows (balances/savings feed need them)
     // Shed stale rows from the in-session inbox/balance state too — otherwise
     // the zero-touch importer re-assigns their roles and re-imports exactly
