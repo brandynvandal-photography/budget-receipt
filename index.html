@@ -587,14 +587,14 @@ body{background:linear-gradient(180deg,#16413a 0px,#10302b 300px,#0a1614 680px) 
   100%{transform:translateY(0) scale(1) rotate(720deg);opacity:1}}
 .til-pay{font-size:13px;color:var(--ink2);text-align:center;margin:8px 0 2px}
 .til-pay b{color:var(--ink);font-weight:700}
-/* Home welcome: time-of-day greeting with the brand pocket, animated in */
-.home-hello{order:-2;display:flex;align-items:center;gap:12px;margin:2px 2px 14px;animation:hello-in .55s cubic-bezier(.22,.61,.36,1) both}
-.home-hello .hh-hi{font-size:22px;font-weight:800;letter-spacing:-.02em;color:var(--ink);line-height:1.15}
-.home-hello .hh-sub{font-size:13.5px;color:var(--ink2);margin-top:2px}
-.home-hello > svg{flex:none;animation:hello-pop .7s cubic-bezier(.34,1.56,.64,1) both .12s}
+/* Onboarding welcome: pocket pops in, wordmark rises, greeting types on */
+.ob-welcome .ob-jar{animation:hello-pop .7s cubic-bezier(.34,1.56,.64,1) both}
+.ob-welcome .ob-h{animation:hello-in .55s cubic-bezier(.22,.61,.36,1) both .15s}
+.ob-welcome .ob-hello-tag{min-height:1.4em;font-size:15px;color:var(--accent);font-weight:600;letter-spacing:.01em;margin:2px 0 6px;animation:hello-in .5s ease both .4s}
+.ob-welcome .ob-p,.ob-welcome .ob-actions{animation:hello-in .55s cubic-bezier(.22,.61,.36,1) both .55s}
 @keyframes hello-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 @keyframes hello-pop{from{opacity:0;transform:scale(.72) rotate(-8deg)}to{opacity:1;transform:none}}
-@media (prefers-reduced-motion: reduce){.home-hello,.home-hello > svg{animation:none}}
+@media (prefers-reduced-motion: reduce){.ob-welcome .ob-jar,.ob-welcome .ob-h,.ob-welcome .ob-hello-tag,.ob-welcome .ob-p,.ob-welcome .ob-actions{animation:none}}
 /* payday pocket: the pay-period buffer, promoted to its own card — it's the
    single most actionable number on the screen */
 .paypocket{display:flex;align-items:center;justify-content:space-between;gap:14px}
@@ -3122,7 +3122,7 @@ const TODAY = todayISO();
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden && todayISO() !== TODAY) location.reload();
 });
-const BUILD_ID = "2026-07-23.9";
+const BUILD_ID = "2026-07-23.10";
 const CURRENT_MONTH = TODAY.slice(0, 7);
 
 /* ---- i18n: follows the device language by default; the core experience is
@@ -4204,9 +4204,10 @@ function Onboarding({ settings, setSetting, setTab }) {
   const back = step > 0 ? /* @__PURE__ */ React.createElement("button", { className: "ob-back", onClick: () => setStep(step - 1) }, tr("btn_back")) : null;
   let body;
   if (step === 0) {
-    body = /* @__PURE__ */ React.createElement("div", { className: "ob-card" },
+    body = /* @__PURE__ */ React.createElement("div", { className: "ob-card ob-welcome" },
       /* @__PURE__ */ React.createElement("div", { className: "ob-jar" }, /* @__PURE__ */ React.createElement(PocketMark, { size: 52 })),
       /* @__PURE__ */ (() => { const _w = tr("ob_welcome_h").split("In My Stash"); return /* @__PURE__ */ React.createElement("h1", { className: "ob-h" }, _w[0], /* @__PURE__ */ React.createElement("span", { className: "ob-wm" }, "inmy", /* @__PURE__ */ React.createElement("span", { className: "logo-accent" }, "stash.")), _w.slice(1).join("In My Stash")); })(),
+      /* @__PURE__ */ React.createElement("div", { className: "ob-hello-tag" }, /* @__PURE__ */ React.createElement(TypeOn, { text: tr("ask_ghost") })),
       /* @__PURE__ */ React.createElement("p", { className: "ob-p" }, tr("ob_welcome_p")),
       /* @__PURE__ */ React.createElement("div", { className: "ob-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: () => setStep(1) }, tr("ob_getstarted"))));
   } else if (step === 1) {
@@ -6003,13 +6004,7 @@ function SimpleHome(p) {
   // spending eats the income (empty + red once overspent)
   const savingsLevel = (settings.savingsGoal || 0) > 0 ? savedTotal / settings.savingsGoal : savedTotal > 0 ? 0.55 : 0;
   const leftLevel = monthIncomeC > 0 ? monthNet / monthIncomeC : 0;
-  return /* @__PURE__ */ React.createElement("div", { className: "bankish" },
-  /* @__PURE__ */ React.createElement("div", { className: "home-hello" },
-    /* @__PURE__ */ React.createElement(PocketMark, { size: 40 }),
-    /* @__PURE__ */ React.createElement("div", null,
-      /* @__PURE__ */ React.createElement("div", { className: "hh-hi" }, (function(){ var h = new Date().getHours(); return h < 12 ? "Good morning." : h < 17 ? "Good afternoon." : "Good evening."; })()),
-      /* @__PURE__ */ React.createElement("div", { className: "hh-sub" }, tr("ask_ghost"), " ;)"))),
-  false && /* @__PURE__ */ React.createElement(Swiper, { labels: ["In the bank", "Left over", "On pace"] }, /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "In the bank"), availableNow != null ? /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement("div", { className: "bankish" }, false && /* @__PURE__ */ React.createElement(Swiper, { labels: ["In the bank", "Left over", "On pace"] }, /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "In the bank"), availableNow != null ? /* @__PURE__ */ React.createElement(
     AnimatedMoneySplit,
     {
       cents: availableNow,
