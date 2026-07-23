@@ -5088,6 +5088,39 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
   // Per-account for the accounts that connection covered (tagged at import);
   // if it was the LAST live connection, clear all bank-imported data + anchors
   // so nothing orphaned lingers (also catches older untagged entries).
+  // Diagnostic report — the month's ledger exactly as the app sees it, with
+  // per-row provenance and flags, so "the numbers are wrong" is debuggable
+  // against ground truth. Stays on-device unless the user shares it.
+  const makeDiag = () => {
+    const m = CURRENT_MONTH;
+    const L = [];
+    L.push("IN MY STASH DIAGNOSTIC · " + m + " · " + new Date().toISOString());
+    const links = (settings.bankLinks || []).map((l) => l.provider + ":" + ((l.accounts || []).map((a) => a.name + (a.mask ? "··" + a.mask : "")).join("/")));
+    L.push("connections: " + (links.join(" | ") || "none"));
+    L.push("roles: " + JSON.stringify(data.sfMap || {}));
+    L.push("anchor: " + JSON.stringify(settings.bankAnchor || null));
+    const flg = (x) => [x.isTransfer ? "XFER" : "", x.billCovered ? "COVERED" : "", x.xferExempt ? "PINNED" : ""].filter(Boolean).join(",");
+    const row = (x, lab) => "  " + x.date + "  " + (x.amount / 100).toFixed(2).padStart(9) + "  [" + (x.account || (String(x.id).startsWith("rec") ? "PLAN" : "manual")) + "] " + (lab || "") + (x.categoryId ? " cat=" + x.categoryId : "") + (flg(x) ? " {" + flg(x) + "}" : "") + "  id=" + String(x.id).slice(0, 24);
+    const inMo = (x) => C.monthOf(x.date) === m;
+    L.push("");
+    L.push("== INCOME counted (sum feeds 'in') ==");
+    let tIn = 0;
+    income.filter((e) => inMo(e) && !e.isTransfer).forEach((e) => { tIn += e.amount; L.push(row(e, e.source)); });
+    L.push("  TOTAL IN = " + (tIn / 100).toFixed(2));
+    L.push("== INCOME excluded as transfers ==");
+    income.filter((e) => inMo(e) && e.isTransfer).forEach((e) => L.push(row(e, e.source)));
+    L.push("");
+    L.push("== OUT counted (sum feeds 'out') ==");
+    let tOut = 0;
+    txns.filter((t) => inMo(t) && !t.isTransfer && !t.billCovered).forEach((t) => { tOut += t.amount; L.push(row(t, t.merchant)); });
+    L.push("  TOTAL OUT = " + (tOut / 100).toFixed(2));
+    L.push("== OUT excluded as transfers ==");
+    txns.filter((t) => inMo(t) && t.isTransfer).forEach((t) => L.push(row(t, t.merchant)));
+    L.push("== plan instances covered by a bank payment ==");
+    txns.filter((t) => inMo(t) && t.billCovered).forEach((t) => L.push(row(t, t.merchant)));
+    return L.join("\n");
+  };
+  window.__diagReport = makeDiag;
   const disconnectBank = (link) => {
     const cid = link.connectionId;
     const allLinks = (data.settings && data.settings.bankLinks) || [];
@@ -5282,16 +5315,26 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
   // since it can't regenerate and may chart stale balances.
   useEffect(() => {
     const links = (settings.bankLinks || []).filter((l) => l.provider === "simplefin" || l.provider === "plaid");
-    if (!links.length || !sfBal || !sfBal.length) return;
+    if (!links.length) return;
     const live = {};
     links.forEach((l) => (l.accounts || []).forEach((a) => { if (a && a.name) live[a.name] = 1; }));
     if (!Object.keys(live).length) return;
-    const stale = (e) => e && e.account && !live[e.account];
+    // Balance-only roles (credit card, savings, ignored): those accounts
+    // contribute BALANCES, never ledger rows — a Credit Builder swipe row plus
+    // the checking-side funding transfer would count the same dollars twice.
+    // Rows from them (old imports, role changes, chaotic early states) are
+    // purged with tombstones, permanently — this needs no balance evidence,
+    // only the role. Liveness-based purging still waits for a real sync
+    // (sfBal) so a half-booted state can't purge a healthy account.
+    const haveFeed = !!(sfBal && sfBal.length);
+    const balOnly = (a) => { const r = (data.sfMap || {})[a]; return r === "credit" || r === "save" || r === "ignore"; };
+    const stale = (e) => e && e.account && (balOnly(e.account) || (haveFeed && !live[e.account]));
+    const staleFeed = (e) => haveFeed && e && e.account && !live[e.account];   // feeds keep balance-only rows (balances/savings feed need them)
     // Shed stale rows from the in-session inbox/balance state too — otherwise
     // the zero-touch importer re-assigns their roles and re-imports exactly
     // what was just purged, and totals flicker in an endless purge/import loop.
-    setInbox((prev) => { if (!prev) return prev; const nx = prev.filter((r) => !stale(r)); return nx.length !== prev.length ? nx : prev; });
-    setSfBal((prev) => { if (!prev) return prev; const nx = prev.filter((b) => !stale(b)); return nx.length !== prev.length ? nx : prev; });
+    setInbox((prev) => { if (!prev) return prev; const nx = prev.filter((r) => !staleFeed(r)); return nx.length !== prev.length ? nx : prev; });
+    setSfBal((prev) => { if (!prev) return prev; const nx = prev.filter((b) => !staleFeed(b)); return nx.length !== prev.length ? nx : prev; });
     setData((d) => {
       const txStale = (d.txns || []).some(stale), inStale = (d.income || []).some(stale);
       const mapStale = Object.keys(d.sfMap || {}).some((k) => !live[k]);
@@ -5312,7 +5355,7 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
       };
       return { ...d, txns, income, sfMap, sfSeen, deleted, ...(dropHist ? { sfHist: {}, sfShas: {} } : {}) };
     });
-  }, [settings.bankLinks, sfBal, syncCfg, setData]);
+  }, [settings.bankLinks, sfBal, syncCfg, data.sfMap, setData]);
   // bank savings activity (round-ups, transfers, interest) — display-only:
   // these are already counted through the savings BALANCE, never re-imported
   const savingsFeed = useMemo(() => {
@@ -5712,7 +5755,7 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
       setView: setActView,
       openAdd: () => setSheetOpen(true)
     }
-  ), effTab === "trends" && /* @__PURE__ */ React.createElement(Trends, { ...shared, sfHist: data.sfHist || {} }), effTab === "funds" && /* @__PURE__ */ React.createElement(Funds, { ...shared }), effTab === "settings" && /* @__PURE__ */ React.createElement(Settings, { ...shared, simpleMode, data, ...{ setSetting, exportJSON, importJSON, resetSeed, syncCfg, setSyncCfg, syncInfo, runSync }, sfMap: data.sfMap || {}, setSfRole: (acct, role) => setData((d) => ({ ...d, sfMap: { ...d.sfMap || {}, [acct]: role } })), disconnectBank })), (effTab === "home" || effTab === "budget" || effTab === "activity") && /* @__PURE__ */ React.createElement(Fab, { openSheet: (k) => { setSheetKind(k); setSheetOpen(true); } }), sheetOpen &&/* @__PURE__ */ React.createElement(
+  ), effTab === "trends" && /* @__PURE__ */ React.createElement(Trends, { ...shared, sfHist: data.sfHist || {} }), effTab === "funds" && /* @__PURE__ */ React.createElement(Funds, { ...shared }), effTab === "settings" && /* @__PURE__ */ React.createElement(Settings, { ...shared, simpleMode, data, ...{ setSetting, exportJSON, importJSON, resetSeed, syncCfg, setSyncCfg, syncInfo, runSync, makeDiag }, sfMap: data.sfMap || {}, setSfRole: (acct, role) => setData((d) => ({ ...d, sfMap: { ...d.sfMap || {}, [acct]: role } })), disconnectBank })), (effTab === "home" || effTab === "budget" || effTab === "activity") && /* @__PURE__ */ React.createElement(Fab, { openSheet: (k) => { setSheetKind(k); setSheetOpen(true); } }), sheetOpen &&/* @__PURE__ */ React.createElement(
     AddSheet,
     {
       ...{ month, addTxn, addIncome, addBatch, categories, merchantMap },
@@ -6855,7 +6898,13 @@ function Settings(p) {
         }
       }
     }
-  )), /* @__PURE__ */ React.createElement("button", { className: "btn quiet", style: { marginTop: 8 }, onClick: () => setSetting("onboarded", false) }, "Replay welcome tour"), /* @__PURE__ */ React.createElement("div", { className: "hint", style: { marginTop: 6, marginBottom: 2 } }, "Walks you through the welcome again — your transactions, income, savings, and settings stay exactly as they are."), /* @__PURE__ */ React.createElement("button", { className: "btn danger-quiet", onClick: () => {
+  )), /* @__PURE__ */ React.createElement("button", { className: "btn quiet", style: { marginTop: 8, marginRight: 8 }, onClick: () => {
+    const txt = p.makeDiag ? p.makeDiag() : "";
+    const done = () => buzz(8);
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(done, done); 
+    const blob = new Blob([txt], { type: "text/plain" });
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "inmystash-diagnostic.txt"; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  } }, "Copy diagnostic report"), /* @__PURE__ */ React.createElement("div", { className: "hint", style: { marginTop: 6, marginBottom: 2 } }, "Numbers look wrong? This copies (and downloads) this month\u2019s ledger exactly as the app sees it \u2014 every counted and excluded row. It stays on your device unless you choose to share it."), /* @__PURE__ */ React.createElement("button", { className: "btn quiet", style: { marginTop: 8 }, onClick: () => setSetting("onboarded", false) }, "Replay welcome tour"), /* @__PURE__ */ React.createElement("div", { className: "hint", style: { marginTop: 6, marginBottom: 2 } }, "Walks you through the welcome again — your transactions, income, savings, and settings stay exactly as they are."), /* @__PURE__ */ React.createElement("button", { className: "btn danger-quiet", onClick: () => {
     if (resetArmed) { setResetArmed(false); try { localStorage.removeItem("budget:sync:v1"); } catch (e) {} STORE.wipe().finally(() => location.reload()); }
     else { setResetArmed(true); setTimeout(() => setResetArmed(false), 3e3); }
   } }, resetArmed ? "Tap again to erase everything" : "Start over")), importErr && /* @__PURE__ */ React.createElement("div", { className: "verdict red", style: { marginTop: 10 } }, /* @__PURE__ */ React.createElement("span", { className: "v-ic" }, "✕"), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("b", null, "Couldn't read that file"), /* @__PURE__ */ React.createElement("span", { className: "v-sub" }, "It wasn't a valid backup — your current data is untouched.")))), /* @__PURE__ */ React.createElement(
