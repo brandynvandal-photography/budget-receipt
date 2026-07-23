@@ -1155,8 +1155,9 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
     }, 0);
   }
   function monthIncome(income, month) {
+    // self-transfers into an account are not income (mirror of isSpend)
     return income.reduce(function (s, e) {
-      return monthOf(e.date) === month ? s + e.amount : s;
+      return monthOf(e.date) === month && !e.isTransfer ? s + e.amount : s;
     }, 0);
   }
   // §4.2 canonical selector
@@ -4619,6 +4620,36 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     Promise.all(conns.map((cid) => P.fetchTransactions(cid).then((r) => ({ cid, r })).catch(() => ({ cid, r: { transactions: [], balances: [], institutions: [] } }))))
       .then((all) => {
         if (!live) return;
+        // Cross-provider dedupe: the SAME account connected through BOTH Plaid
+        // and SimpleFIN (matched by mask, else normalized name) must not count
+        // twice. Plaid's feed wins (it carries categories); the SimpleFIN copy
+        // of that account is dropped — rows, balances, and its slot on the
+        // card — before anything merges.
+        const provByCid = {};
+        (settings.bankLinks || []).forEach((l) => { if (l.connectionId) provByCid[l.connectionId] = l.provider; });
+        const norm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+        const plaidMask = {}, plaidName = {};
+        all.forEach(({ cid, r }) => {
+          if (provByCid[cid] !== "plaid") return;
+          (r.institutions || []).forEach((g) => (g.accounts || []).forEach((a) => {
+            if (a && a.mask) plaidMask[a.mask] = 1;
+            if (a && a.name) plaidName[norm(a.name)] = 1;
+          }));
+        });
+        if (Object.keys(plaidMask).length || Object.keys(plaidName).length) {
+          all.forEach((one) => {
+            if (provByCid[one.cid] === "plaid") return;
+            const maskByName = {};
+            (one.r.institutions || []).forEach((g) => (g.accounts || []).forEach((a) => { if (a && a.name) maskByName[a.name] = a.mask || null; }));
+            const dup = (name) => { const m = maskByName[name]; return !!((m && plaidMask[m]) || plaidName[norm(name)]); };
+            one.r = {
+              ...one.r,
+              transactions: (one.r.transactions || []).filter((t) => !(t && t.account && dup(t.account))),
+              balances: (one.r.balances || []).filter((b) => !(b && b.account && dup(b.account))),
+              institutions: (one.r.institutions || []).map((g) => ({ ...g, accounts: (g.accounts || []).filter((a) => !(a && a.name && dup(a.name))) })).filter((g) => (g.accounts || []).length),
+            };
+          });
+        }
         const txns = [], bals = [], freshByConn = {};
         all.forEach(({ cid, r }) => {
           (r.transactions || []).forEach((t) => txns.push(t));
@@ -4724,7 +4755,8 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     importInbox(inboxNew.map((r) => {
       const pfc = String(r.pfc || "");
       const xferPfc = /^(TRANSFER_IN|TRANSFER_OUT|LOAN_PAYMENTS)/.test(pfc);
-      const xferLabel = r.kind === "spend" && /\b(transfer|xfer|to savings|to checking|internal transfer|wire transfer|fidelity|vanguard|robinhood|coinbase)\b/i.test(r.label || "");
+      const xferLabel = (r.kind === "spend" && /\b(transfer|xfer|to savings|to checking|internal transfer|wire transfer|fidelity|vanguard|robinhood|coinbase)\b/i.test(r.label || ""))
+        || (r.kind === "income" && /\b(transfer|xfer)\b/i.test(r.label || ""));
       const kind = (xferPfc || xferLabel) ? "transfer" : r.kind;
       const cat = kind === "spend" && R ? (R.guessCategory(r.label, categories, merchantMap) || (categories.some((c) => c.id === PFC_CAT[pfc]) ? PFC_CAT[pfc] : "") || "") : "";
       return { ...r, kind, categoryId: cat };
@@ -4952,6 +4984,38 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     });
     setSfBal((prev) => lastConn ? [] : (prev || []).filter((b) => !(b && names[b.account])));
   };
+  // Transfer pairing: money moved between YOUR OWN accounts is neither income
+  // nor spending. A bank-tagged deposit that matches a bank-tagged withdrawal
+  // from a DIFFERENT account (same amount, within 3 days) is a self-transfer —
+  // both sides get marked so IN/OUT reflect real earning and real spending.
+  // Idempotent: marked rows never re-match, so this settles in one pass.
+  useEffect(() => {
+    const txs = data.txns || [], inc = data.income || [];
+    const markT = {}, markI = {};
+    // (a) label pass — bank-tagged rows whose label literally says transfer.
+    // Deposits require the word transfer/xfer specifically (paychecks never
+    // say that), because the OTHER side of a checking↔savings move is never
+    // imported (savings accounts are balance-only) and so can't be paired.
+    const IN_XFER = /\b(transfer|xfer)\b/i;
+    const OUT_XFER = /\b(transfer|xfer|to savings|to checking|internal transfer|wire transfer|fidelity|vanguard|robinhood|coinbase)\b/i;
+    inc.forEach((e) => { if (e && e.account && !e.isTransfer && IN_XFER.test(e.source || "")) markI[e.id] = 1; });
+    txs.forEach((t) => { if (t && t.account && !t.isTransfer && OUT_XFER.test(t.merchant || "")) markT[t.id] = 1; });
+    // (b) pairing pass — a deposit matching a withdrawal from a DIFFERENT
+    // account (same amount, within 3 days) is a move between two imported
+    // accounts; both sides marked.
+    inc.forEach((e) => {
+      if (!e || !e.account || e.isTransfer || markI[e.id] || !e.date) return;
+      const eTime = new Date(e.date + "T12:00").getTime();
+      const m = txs.find((t) => t && t.account && t.account !== e.account && !t.isTransfer && !markT[t.id] && t.amount === e.amount && t.amount > 0 && t.date && Math.abs(new Date(t.date + "T12:00").getTime() - eTime) <= 3 * 864e5);
+      if (m) { markT[m.id] = 1; markI[e.id] = 1; }
+    });
+    if (!Object.keys(markT).length && !Object.keys(markI).length) return;
+    setData((d) => ({
+      ...d,
+      txns: d.txns.map((t) => markT[t.id] ? { ...t, isTransfer: 1, categoryId: null } : t),
+      income: d.income.map((e) => markI[e.id] ? { ...e, isTransfer: 1 } : e)
+    }));
+  }, [data.txns, data.income, setData]);
   // Stale-bank sweep: once a LIVE sync has reported (sfBal present), any
   // bank-tagged entries whose account belongs to NO current connection are
   // leftovers — sandbox/demo-era imports, or connections removed before the
@@ -5487,7 +5551,8 @@ function SimpleHome(p) {
     savedTotal,
     totalCushion,
     availableNow,
-    setSetting
+    setSetting,
+    addTxn
   } = p;
   const dayNum = +TODAY.slice(8, 10);
   const daysInMo = C.daysInMonth(month);
@@ -5652,6 +5717,23 @@ function SimpleHome(p) {
       sub: (leniency > 1 && cents > (vPerDay || 0) * 3 ? "Essentials get some slack \u2014 you'd have " + money(v.leftAfter) + " left " + periodTail + "." : "You'd still have " + money(v.leftAfter) + " left " + periodTail + ".") + (leniency <= 1 && (settings.savingsGoal || 0) > 0 && savedTotal < settings.savingsGoal ? " Or stash it \u2014 " + money(cents) + " closer to your " + fmt0(settings.savingsGoal) + " goal." : "")
     }
   }[v.reason];
+  // Close the loop: the verdict becomes an action. GREEN logs the purchase,
+  // RED stashes the amount toward the goal instead, AMBER offers both — every
+  // answer leaves a mark instead of evaporating.
+  const BUCKET_CAT = { emergency: "gen", food: "gro", gas: "trans", bills: "bills", general: "gen", fun: "dine" };
+  const logAsk = () => {
+    if (!(cents > 0) || !addTxn) return;
+    const cat = BUCKET_CAT[bucket] || "gen";
+    const bl = (C.SPEND_BUCKETS.find((b) => b.id === bucket) || { label: "Spend" }).label;
+    addTxn({ date: TODAY, merchant: "Asked · " + bl, amount: (cents / 100).toFixed(2), categoryId: (p.categories || []).some((c) => c.id === cat) ? cat : "gen" });
+    buzz(8); setAmt(""); setBucket(null);
+  };
+  const stashAsk = () => {
+    if (!(cents > 0) || !addTxn) return;
+    const sc = (p.categories || []).find((c) => c.class === "SAVING");
+    addTxn({ date: TODAY, merchant: "Stashed instead", amount: (cents / 100).toFixed(2), categoryId: sc ? sc.id : null });
+    buzz([8, 30, 8]); setAmt(""); setBucket(null);
+  };
   const buckets = C.SPEND_BUCKETS;
   // jar levels: savings fills toward the goal; the month's jar drains as
   // spending eats the income (empty + red once overspent)
@@ -5705,7 +5787,9 @@ function SimpleHome(p) {
     },
     /* @__PURE__ */ React.createElement("span", { className: "b-ic" }, b.icon),
     b.label
-  ))), cents != null && cents > 0 && !bucket && /* @__PURE__ */ React.createElement("div", { className: "hint", style: { textAlign: "center", marginTop: 8 } }, "Pick the category that fits — essentials get more slack, fun gets less."), reservedC > 0 && !v && /* @__PURE__ */ React.createElement("div", { className: "hint", style: { textAlign: "center", marginTop: 8 } }, money(reservedC), " held back for bills due later this month."), v && monthNet > 0 && cents > 0 && /* @__PURE__ */ React.createElement("div", { className: "impact" }, /* @__PURE__ */ React.createElement("div", { className: "meter " + (v.verdict === "RED" ? "crit-track" : v.verdict === "AMBER" ? "warn-track" : "") }, /* @__PURE__ */ React.createElement("i", { style: { transform: "scaleX(" + Math.max(0, Math.min(1, v.leftAfter / monthNet)).toFixed(4) + ")" } })), /* @__PURE__ */ React.createElement("div", { className: "impact-cap" }, v.leftAfter >= 0 ? money(v.leftAfter) + " left this month after this" : money(-v.leftAfter) + " over for the month")), v && (v.verdict !== "RED" || bucket === "emergency" || bucket === "bills") && /* @__PURE__ */ React.createElement("div", { className: "verdict-stage", key: "stage-" + v.verdict + "-" + v.reason }, v.verdict === "RED" ? /* @__PURE__ */ React.createElement(StashAnim, null) : v.verdict === "GREEN" ? /* @__PURE__ */ React.createElement(SwipeAnim, null) : /* @__PURE__ */ React.createElement(CoinAnim, null)), v && /* @__PURE__ */ React.createElement("div", { key: "vd-" + v.verdict, className: "verdict " + v.verdict.toLowerCase(), role: "status" }, /* @__PURE__ */ React.createElement("span", { className: "v-ic" }, copy.ic), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("b", null, copy.head), /* @__PURE__ */ React.createElement("span", { className: "v-sub" }, copy.sub))), false, !v && /* @__PURE__ */ React.createElement("div", { className: "pocket-brand" }, /* @__PURE__ */ React.createElement(PocketMark, { size: 34 }), /* @__PURE__ */ React.createElement("div", { className: "pocket-tag" }, /* @__PURE__ */ React.createElement(TypeOn, { text: tr("ask_ghost") })))), false && /* @__PURE__ */ React.createElement("div", { className: "tilerow jar-center" }, /* @__PURE__ */ React.createElement("div", { className: "minitile" }, /* @__PURE__ */ React.createElement("div", { className: "mt-label" }, "Saved up"), /* @__PURE__ */ React.createElement(AnimatedFmt0, { className: "mt-val", cents: savedTotal })), /* @__PURE__ */ React.createElement(Jar, { level: savingsLevel, size: 46, tid: "saved" }), /* @__PURE__ */ React.createElement("div", { className: "minitile" }, /* @__PURE__ */ React.createElement("div", { className: "mt-label" }, "Safety net"), /* @__PURE__ */ React.createElement("div", { className: "mt-val" }, runway === Infinity ? "\u2014" : runway.toFixed(1) + "mo"))), dataMonths.length > 1 ? null : false ? /* @__PURE__ */ React.createElement("section", { className: "card center" }, /* @__PURE__ */ React.createElement("div", { className: "empty" }, /* @__PURE__ */ React.createElement("span", { className: "e-ic" }, "\u{1F4B5}"), "Tap ", /* @__PURE__ */ React.createElement("b", null, "+"), " and log your first deposit.")) : null);
+  ))), cents != null && cents > 0 && !bucket && /* @__PURE__ */ React.createElement("div", { className: "hint", style: { textAlign: "center", marginTop: 8 } }, "Pick the category that fits — essentials get more slack, fun gets less."), reservedC > 0 && !v && /* @__PURE__ */ React.createElement("div", { className: "hint", style: { textAlign: "center", marginTop: 8 } }, money(reservedC), " held back for bills due later this month."), v && monthNet > 0 && cents > 0 && /* @__PURE__ */ React.createElement("div", { className: "impact" }, /* @__PURE__ */ React.createElement("div", { className: "meter " + (v.verdict === "RED" ? "crit-track" : v.verdict === "AMBER" ? "warn-track" : "") }, /* @__PURE__ */ React.createElement("i", { style: { transform: "scaleX(" + Math.max(0, Math.min(1, v.leftAfter / monthNet)).toFixed(4) + ")" } })), /* @__PURE__ */ React.createElement("div", { className: "impact-cap" }, v.leftAfter >= 0 ? money(v.leftAfter) + " left this month after this" : money(-v.leftAfter) + " over for the month")), v && (v.verdict !== "RED" || bucket === "emergency" || bucket === "bills") && /* @__PURE__ */ React.createElement("div", { className: "verdict-stage", key: "stage-" + v.verdict + "-" + v.reason }, v.verdict === "RED" ? /* @__PURE__ */ React.createElement(StashAnim, null) : v.verdict === "GREEN" ? /* @__PURE__ */ React.createElement(SwipeAnim, null) : /* @__PURE__ */ React.createElement(CoinAnim, null)), v && /* @__PURE__ */ React.createElement("div", { key: "vd-" + v.verdict, className: "verdict " + v.verdict.toLowerCase(), role: "status" }, /* @__PURE__ */ React.createElement("span", { className: "v-ic" }, copy.ic), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("b", null, copy.head), /* @__PURE__ */ React.createElement("span", { className: "v-sub" }, copy.sub))), v && /* @__PURE__ */ React.createElement("div", { className: "btn-row", style: { justifyContent: "center", marginTop: 10 } },
+    (v.verdict === "GREEN" || v.verdict === "AMBER") && /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: logAsk }, "Log it"),
+    (v.verdict === "RED" || v.verdict === "AMBER") && /* @__PURE__ */ React.createElement("button", { className: "btn " + (v.verdict === "RED" ? "primary" : "quiet"), onClick: stashAsk }, "Stash it instead")), false, !v &&/* @__PURE__ */ React.createElement("div", { className: "pocket-brand" }, /* @__PURE__ */ React.createElement(PocketMark, { size: 34 }), /* @__PURE__ */ React.createElement("div", { className: "pocket-tag" }, /* @__PURE__ */ React.createElement(TypeOn, { text: tr("ask_ghost") })))), false && /* @__PURE__ */ React.createElement("div", { className: "tilerow jar-center" }, /* @__PURE__ */ React.createElement("div", { className: "minitile" }, /* @__PURE__ */ React.createElement("div", { className: "mt-label" }, "Saved up"), /* @__PURE__ */ React.createElement(AnimatedFmt0, { className: "mt-val", cents: savedTotal })), /* @__PURE__ */ React.createElement(Jar, { level: savingsLevel, size: 46, tid: "saved" }), /* @__PURE__ */ React.createElement("div", { className: "minitile" }, /* @__PURE__ */ React.createElement("div", { className: "mt-label" }, "Safety net"), /* @__PURE__ */ React.createElement("div", { className: "mt-val" }, runway === Infinity ? "\u2014" : runway.toFixed(1) + "mo"))), dataMonths.length > 1 ? null : false ? /* @__PURE__ */ React.createElement("section", { className: "card center" }, /* @__PURE__ */ React.createElement("div", { className: "empty" }, /* @__PURE__ */ React.createElement("span", { className: "e-ic" }, "\u{1F4B5}"), "Tap ", /* @__PURE__ */ React.createElement("b", null, "+"), " and log your first deposit.")) : null);
 }
 function EnvelopeRow({ r, compact, onTap }) {
   const pct = r.planned > 0 ? r.spent / r.planned : r.spent > 0 ? 1 : 0;
@@ -5957,7 +6041,7 @@ function Activity(p) {
     : (a, b) => a.date < b.date ? 1 : a.date > b.date ? -1 : 0;
   const spendList = txns.filter((t) => (showAll || C.monthOf(t.date) === month) && !savingIds[t.categoryId] && matchTx(t)).slice().sort(sortFn);
   const saveList = txns.filter((t) => (showAll || C.monthOf(t.date) === month) && savingIds[t.categoryId] && matchTx(t)).slice().sort(sortFn);
-  const incomeList = income.filter((e) => (showAll || C.monthOf(e.date) === month) && matchIn(e)).slice().sort(sortFn);
+  const incomeList = income.filter((e) => !e.isTransfer && (showAll || C.monthOf(e.date) === month) && matchIn(e)).slice().sort(sortFn);
   const uncatFirst = spendList;
   return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h2", { className: "screen-title" }, "Activity"), billPrompt && /* @__PURE__ */ React.createElement("div", { className: "billprompt-bubble billprompt-inline", role: "group", "aria-label": "Is this a recurring bill?" }, /* @__PURE__ */ React.createElement("div", { className: "bt-msg" }, "Is “", billPrompt.merchant, "” a recurring bill?"), /* @__PURE__ */ React.createElement("div", { className: "bt-row" }, /* @__PURE__ */ React.createElement("label", { className: "bt-day" }, "Comes out day ", /* @__PURE__ */ React.createElement("input", { type: "number", min: 1, max: 31, value: billPrompt.day, onChange: (e) => setBillPrompt({ ...billPrompt, day: Math.max(1, Math.min(31, +e.target.value || 1)) }) })), /* @__PURE__ */ React.createElement("div", { className: "bt-btns" }, /* @__PURE__ */ React.createElement("button", { className: "btn quiet", onClick: () => setBillPrompt(null) }, "One-time"), /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: addRecurringBill }, "Every month"))), /* @__PURE__ */ React.createElement("div", { className: "bt-sub" }, money(billPrompt.amount), " · held back every month until you remove it in Settings → Recurring & upcoming")), /* @__PURE__ */ React.createElement(Swiper, { labels: ["In the bank", "Saved up", "Safety net"] }, /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "In the bank"), p.availableNow != null ? /* @__PURE__ */ React.createElement(AnimatedMoneySplit, { cents: p.availableNow, className: "bank-val" + (p.availableNow < 0 ? " overspent" : "") }) : /* @__PURE__ */ React.createElement("div", { className: "bank-val", style: { opacity: 0.5 } }, "\u2014"), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, (p.settings.paycheck || {}).amount > 0 ? money(p.settings.paycheck.amount) + " per paycheck \u00b7 " + fmt0(monthSpendC) + " out \u00b7 " + monthLabel(month) : fmt0(monthIncomeC) + " in \u00b7 " + fmt0(monthSpendC) + " out \u00b7 " + monthLabel(month))), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "Saved up"), /* @__PURE__ */ React.createElement(AnimatedFmt0, { className: "bank-val", cents: p.savedTotal }), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, (function(){ var names = Object.keys(p.sfMap || {}).filter(function(a){ return (p.sfMap || {})[a] === "save"; }); return names.length ? names.join(" + ") : "your savings, all in one place"; })())), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "Safety net"), /* @__PURE__ */ React.createElement("div", { className: "bank-val" }, p.runway === Infinity ? "\u2014" : p.runway.toFixed(1) + " mo"), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, "if income stopped"))), /* @__PURE__ */ React.createElement("div", { className: "seg", role: "group", "aria-label": "Filter activity" }, /* @__PURE__ */ React.createElement("button", { className: view === "spend" ? "on" : "", "aria-pressed": view === "spend", onClick: () => setView("spend") }, "Spending"), /* @__PURE__ */ React.createElement("button", { className: view === "income" ? "on" : "", "aria-pressed": view === "income", onClick: () => setView("income") }, "Income"), /* @__PURE__ */ React.createElement("button", { className: view === "save" ? "on" : "", "aria-pressed": view === "save", onClick: () => setView("save") }, "Savings")), /* @__PURE__ */ React.createElement("div", { className: "actbar" }, /* @__PURE__ */ React.createElement("select", { className: "actsort actmonth", value: showAll ? "all" : month, onChange: (e) => { const v = e.target.value; if (v === "all") setShowAll(true); else { setShowAll(false); setMonth(v); } }, "aria-label": "Filter by month" }, /* @__PURE__ */ React.createElement("option", { value: "all" }, "All months"), monthOptions.map((m) => /* @__PURE__ */ React.createElement("option", { key: m, value: m }, monthLabel(m)))), /* @__PURE__ */ React.createElement("input", { className: "actsearch", type: "search", inputMode: "search", placeholder: "\u{1F50D} Search", value: q, onChange: (e) => setQ(e.target.value) }), /* @__PURE__ */ React.createElement("select", { className: "actsort", value: sortBy, onChange: (e) => setSortBy(e.target.value), "aria-label": "Sort" }, /* @__PURE__ */ React.createElement("option", { value: "date" }, "Newest"), /* @__PURE__ */ React.createElement("option", { value: "amount" }, "Amount \u2193"))), view === "spend" && (() => {
     const isBill = (t) => String(t.id || "").startsWith("recbill");
