@@ -3122,7 +3122,7 @@ const TODAY = todayISO();
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden && todayISO() !== TODAY) location.reload();
 });
-const BUILD_ID = "2026-07-23.15";
+const BUILD_ID = "2026-07-23.16";
 const CURRENT_MONTH = TODAY.slice(0, 7);
 
 /* ---- i18n: follows the device language by default; the core experience is
@@ -5027,6 +5027,16 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     const flg = (x) => [x.isTransfer ? "XFER" : "", x.billCovered ? "COVERED" : "", x.xferExempt ? "PINNED" : ""].filter(Boolean).join(",");
     const row = (x, lab) => "  " + x.date + "  " + (x.amount / 100).toFixed(2).padStart(9) + "  [" + (x.account || (String(x.id).startsWith("rec") ? "PLAN" : "manual")) + "] " + (lab || "") + (x.categoryId ? " cat=" + x.categoryId : "") + (flg(x) ? " {" + flg(x) + "}" : "") + "  id=" + String(x.id).slice(0, 24);
     const inMo = (x) => C.monthOf(x.date) === m;
+    const del = data.deleted || {};
+    const plainSf = (l) => (l || []).filter((x) => String(x).indexOf("sf-") === 0 && String(x).indexOf("@") < 0).length;
+    L.push("deleted: txns=" + ((del.txns || []).length) + " (plainSf " + plainSf(del.txns) + ") · income=" + ((del.income || []).length) + " (plainSf " + plainSf(del.income) + ")");
+    L.push("sfSeen: " + Object.keys(data.sfSeen || {}).length + " · migRecovAt: " + (data.migRecovAt || "never"));
+    let thr = "?"; try { thr = (localStorage.getItem("stash.relay.lastSync") || "none") + " sig=" + (localStorage.getItem("stash.relay.lastSyncSig") || "none"); } catch (e) {}
+    L.push("throttle: " + thr);
+    L.push("sfBal: " + JSON.stringify((sfBal || []).map((b) => b.account + "=" + b.balance)));
+    L.push("inbox: " + ((inbox || []).length) + " rows; first 5:");
+    (inbox || []).slice(0, 5).forEach((r) => L.push("  " + JSON.stringify({ id: String(r.id).slice(0, 14), acct: r.account, date: r.date, cents: r.cents, kind: r.kind, pending: !!r.pending, label: String(r.label || "").slice(0, 30) })));
+    L.push("xferMap: " + JSON.stringify(data.xferMap || {}));
     L.push("");
     L.push("== INCOME counted (sum feeds 'in') ==");
     let tIn = 0;
