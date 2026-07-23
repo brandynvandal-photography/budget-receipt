@@ -4676,6 +4676,7 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
         }));
       });
       if (JSON.stringify(out) !== JSON.stringify(cur)) setSetting("bankLinks", out);
+      setServerSeen(true);   // server confirmed the connection list this session
       // Server says ZERO bank connections → any bank-tagged rows still in the
       // ledger are orphans (e.g. resurrected by device sync from a disconnect
       // that predates tombstoning). Purge them WITH tombstones so they stay
@@ -5088,6 +5089,7 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
   // Per-account for the accounts that connection covered (tagged at import);
   // if it was the LAST live connection, clear all bank-imported data + anchors
   // so nothing orphaned lingers (also catches older untagged entries).
+  const [serverSeen, setServerSeen] = useState(false);
   // Diagnostic report — the month's ledger exactly as the app sees it, with
   // per-row provenance and flags, so "the numbers are wrong" is debuggable
   // against ground truth. Stays on-device unless the user shares it.
@@ -5220,12 +5222,24 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
   // too — far rarer than the dual-provider duplication it cures, and
   // re-addable by hand.
   useEffect(() => {
-    const seenKey = {}, dropT = [], dropI = [];
+    // Same account+amount+normalized-label within ±2 days = one transaction.
+    // (Exact-date matching missed re-imports whose posted date shifted a day
+    // — a Plaid reconnect mints all-new ids and often re-dates rows.)
+    const dropT = [], dropI = [];
     const scan = (arr, isInc, bag) => {
+      const groups = {};
       (arr || []).forEach((e) => {
         if (!e || !e.account || !e.id || !e.date) return;
-        const k = e.account + "|" + e.date + "|" + e.amount + "|" + normXfer(isInc ? e.source : e.merchant);
-        if (seenKey[k]) bag.push(e.id); else seenKey[k] = 1;
+        const g = e.account + "|" + e.amount + "|" + normXfer(isInc ? e.source : e.merchant);
+        (groups[g] = groups[g] || []).push(e);
+      });
+      Object.keys(groups).forEach((g) => {
+        const rows = groups[g].sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : String(a.id) < String(b.id) ? -1 : 1);
+        let kept = null;
+        rows.forEach((e) => {
+          if (kept && Math.abs(new Date(e.date + "T12:00") - new Date(kept.date + "T12:00")) <= 2 * 864e5) { bag.push(e.id); return; }
+          kept = e;
+        });
       });
     };
     scan(data.txns, false, dropT); scan(data.income, true, dropI);
@@ -5326,7 +5340,10 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     // purged with tombstones, permanently — this needs no balance evidence,
     // only the role. Liveness-based purging still waits for a real sync
     // (sfBal) so a half-booted state can't purge a healthy account.
-    const haveFeed = !!(sfBal && sfBal.length);
+    // liveness evidence: a real balance report OR the server's authoritative
+    // connection list from this session's reconcile — either proves the
+    // account names in bankLinks are current, so stale-name rows can go.
+    const haveFeed = !!(sfBal && sfBal.length) || serverSeen;
     const balOnly = (a) => { const r = (data.sfMap || {})[a]; return r === "credit" || r === "save" || r === "ignore"; };
     const stale = (e) => e && e.account && (balOnly(e.account) || (haveFeed && !live[e.account]));
     const staleFeed = (e) => haveFeed && e && e.account && !live[e.account];   // feeds keep balance-only rows (balances/savings feed need them)
@@ -5355,7 +5372,7 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
       };
       return { ...d, txns, income, sfMap, sfSeen, deleted, ...(dropHist ? { sfHist: {}, sfShas: {} } : {}) };
     });
-  }, [settings.bankLinks, sfBal, syncCfg, data.sfMap, setData]);
+  }, [settings.bankLinks, sfBal, syncCfg, data.sfMap, serverSeen, setData]);
   // bank savings activity (round-ups, transfers, interest) — display-only:
   // these are already counted through the savings BALANCE, never re-imported
   const savingsFeed = useMemo(() => {
