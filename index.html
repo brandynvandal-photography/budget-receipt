@@ -4588,6 +4588,28 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
         }));
       });
       if (JSON.stringify(out) !== JSON.stringify(cur)) setSetting("bankLinks", out);
+      // Server says ZERO bank connections → any bank-tagged rows still in the
+      // ledger are orphans (e.g. resurrected by device sync from a disconnect
+      // that predates tombstoning). Purge them WITH tombstones so they stay
+      // gone on every device. Manual entries and plan history (no account tag,
+      // no sf- prefix) are untouched.
+      if (!out.some((l) => l.provider === "simplefin" || l.provider === "plaid")) {
+        setData((d) => {
+          const isBank = (e) => e && ((typeof e.id === "string" && e.id.indexOf("sf-") === 0) || e.account);
+          if (!(d.txns || []).some(isBank) && !(d.income || []).some(isBank) && !Object.keys(d.sfMap || {}).length) return d;
+          const remT = [], remI = [];
+          const keep = (arr, bag) => (arr || []).filter((e) => { if (isBank(e)) { if (e.id) bag.push(e.id); return false; } return true; });
+          const txns = keep(d.txns, remT), income = keep(d.income, remI);
+          const settings2 = { ...d.settings };
+          delete settings2.bankAnchor; delete settings2.savingsAnchor;
+          const deleted = {
+            txns: [...((d.deleted || {}).txns || []), ...remT.map(stone)].slice(-1e3),
+            income: [...((d.deleted || {}).income || []), ...remI.map(stone)].slice(-1e3)
+          };
+          return { ...d, settings: settings2, txns, income, sfMap: {}, sfSeen: {}, sfHist: {}, sfShas: {}, deleted };
+        });
+        setSfBal([]);
+      }
     }).catch(() => {});
     return () => { live = false; };
   }, [settings.relayKeys]);
@@ -4973,14 +4995,20 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     setData((d) => {
       const isBank = (e) => e && typeof e.id === "string" && e.id.indexOf("sf-") === 0;
       const drop = (e) => lastConn ? isBank(e) : (e && e.account && names[e.account]);
-      const removedIds = [];
-      const keep = (arr) => (arr || []).filter((e) => { if (drop(e)) { if (e && e.id) removedIds.push(e.id); return false; } return true; });
-      const txns = keep(d.txns), income = keep(d.income);
+      const removedTx = [], removedInc = [];
+      const keep = (arr, bag) => (arr || []).filter((e) => { if (drop(e)) { if (e && e.id) bag.push(e.id); return false; } return true; });
+      const txns = keep(d.txns, removedTx), income = keep(d.income, removedInc);
       const sfMap = lastConn ? {} : (() => { const m = { ...(d.sfMap || {}) }; Object.keys(names).forEach((n) => delete m[n]); return m; })();
-      const sfSeen = { ...(d.sfSeen || {}) }; removedIds.forEach((id) => delete sfSeen[id]);
+      const sfSeen = { ...(d.sfSeen || {}) }; removedTx.concat(removedInc).forEach((id) => delete sfSeen[id]);
       const settings = { ...d.settings, bankLinks: (d.settings.bankLinks || []).filter((x) => x.connectionId !== cid) };
       if (lastConn) { delete settings.bankAnchor; delete settings.savingsAnchor; }
-      return { ...d, settings, txns, income, sfMap, sfSeen };
+      // Tombstone every purged row — without these, the E2E device sync merges
+      // the other device's copy straight back and the data resurrects.
+      const deleted = {
+        txns: [...((d.deleted || {}).txns || []), ...removedTx.map(stone)].slice(-1e3),
+        income: [...((d.deleted || {}).income || []), ...removedInc.map(stone)].slice(-1e3)
+      };
+      return { ...d, settings, txns, income, sfMap, sfSeen, deleted };
     });
     setSfBal((prev) => lastConn ? [] : (prev || []).filter((b) => !(b && names[b.account])));
   };
@@ -5016,6 +5044,35 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
       income: d.income.map((e) => markI[e.id] ? { ...e, isTransfer: 1 } : e)
     }));
   }, [data.txns, data.income, setData]);
+  // Ask-log reconciliation: a purchase logged from the verdict ("Log it")
+  // arrives AGAIN through the bank feed days later, double-counting it. When
+  // a bank-tagged twin shows up (same amount, within 4 days), the bank row is
+  // the durable record — it ADOPTS the log's category (the user's stated
+  // bucket beats the bank's guess) and the manual log is removed WITH a
+  // tombstone so device sync can't resurrect it. The purchase counts once.
+  useEffect(() => {
+    const txs = data.txns || [];
+    const logs = txs.filter((t) => t && typeof t.id === "string" && t.id.charAt(0) === "t" && !t.account && /^Asked · /.test(t.merchant || ""));
+    if (!logs.length) return;
+    const used = {}, dropIds = {}, recat = {};
+    logs.forEach((L) => {
+      if (!L.date) return;
+      const lTime = new Date(L.date + "T12:00").getTime();
+      let best = null, bestGap = Infinity;
+      txs.forEach((t) => {
+        if (!t || !t.account || t.isTransfer || used[t.id] || t.amount !== L.amount || !t.date) return;
+        const gap = Math.abs(new Date(t.date + "T12:00").getTime() - lTime);
+        if (gap <= 4 * 864e5 && gap < bestGap) { best = t; bestGap = gap; }
+      });
+      if (best) { used[best.id] = 1; dropIds[L.id] = 1; if (L.categoryId) recat[best.id] = L.categoryId; }
+    });
+    if (!Object.keys(dropIds).length) return;
+    setData((d) => ({
+      ...d,
+      txns: (d.txns || []).filter((t) => !dropIds[t.id]).map((t) => recat[t.id] ? { ...t, categoryId: recat[t.id], _m: Date.now() } : t),
+      deleted: { ...(d.deleted || {}), txns: [...((d.deleted || {}).txns || []), ...Object.keys(dropIds).map(stone)].slice(-1e3) }
+    }));
+  }, [data.txns, setData]);
   // Stale-bank sweep: once a LIVE sync has reported (sfBal present), any
   // bank-tagged entries whose account belongs to NO current connection are
   // leftovers — sandbox/demo-era imports, or connections removed before the
@@ -5041,15 +5098,21 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
       const txStale = (d.txns || []).some(stale), inStale = (d.income || []).some(stale);
       const mapStale = Object.keys(d.sfMap || {}).some((k) => !live[k]);
       if (!txStale && !inStale && !mapStale) return d;
-      const removedIds = [];
-      const keep = (arr) => (arr || []).filter((e) => { if (stale(e)) { if (e.id) removedIds.push(e.id); return false; } return true; });
-      const txns = keep(d.txns), income = keep(d.income);
+      const remT = [], remI = [];
+      const keep = (arr, bag) => (arr || []).filter((e) => { if (stale(e)) { if (e.id) bag.push(e.id); return false; } return true; });
+      const txns = keep(d.txns, remT), income = keep(d.income, remI);
       const sfMap = {};
       Object.keys(d.sfMap || {}).forEach((k) => { if (live[k]) sfMap[k] = d.sfMap[k]; });
       const sfSeen = { ...(d.sfSeen || {}) };
-      removedIds.forEach((id) => delete sfSeen[id]);
+      remT.concat(remI).forEach((id) => delete sfSeen[id]);
       const dropHist = !(syncCfg && syncCfg.enabled);
-      return { ...d, txns, income, sfMap, sfSeen, ...(dropHist ? { sfHist: {}, sfShas: {} } : {}) };
+      // Tombstone the purge — without these the device sync merges the other
+      // device's copy straight back and the stale data resurrects.
+      const deleted = {
+        txns: [...((d.deleted || {}).txns || []), ...remT.map(stone)].slice(-1e3),
+        income: [...((d.deleted || {}).income || []), ...remI.map(stone)].slice(-1e3)
+      };
+      return { ...d, txns, income, sfMap, sfSeen, deleted, ...(dropHist ? { sfHist: {}, sfShas: {} } : {}) };
     });
   }, [settings.bankLinks, sfBal, syncCfg, setData]);
   // bank savings activity (round-ups, transfers, interest) — display-only:
