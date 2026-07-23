@@ -2010,9 +2010,13 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
     staleIds["recinc-" + CUR] = 1;
     staleIds["recsave-" + CUR] = 1;
     var dropStale = function (id) { return !staleIds[id]; };   // plain stale ids only
-    var delTx = unionList(local.deleted && local.deleted.txns, remote.deleted && remote.deleted.txns)
+    // Plain (untimestamped) sf- tombstones are a retired class: old purge
+    // bugs mass-produced them and they re-erase re-imported history on every
+    // merge. Scrub them from both sides — the cloud copy heals on next push.
+    var scrubSf = function (l) { return (l || []).filter(function (id) { return !(String(id).indexOf("sf-") === 0 && String(id).indexOf("@") < 0); }); };
+    var delTx = unionList(scrubSf(local.deleted && local.deleted.txns), scrubSf(remote.deleted && remote.deleted.txns))
       .filter(dropStale);
-    var delIn = unionList(local.deleted && local.deleted.income, remote.deleted && remote.deleted.income)
+    var delIn = unionList(scrubSf(local.deleted && local.deleted.income), scrubSf(remote.deleted && remote.deleted.income))
       .filter(dropStale);
     // dead maps match by BASE id; value = tombstone time (Infinity when plain)
     var stamp = function (map, id) {
@@ -3123,7 +3127,7 @@ const TODAY = todayISO();
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden && todayISO() !== TODAY) location.reload();
 });
-const BUILD_ID = "2026-07-23.17";
+const BUILD_ID = "2026-07-23.18";
 const CURRENT_MONTH = TODAY.slice(0, 7);
 
 /* ---- i18n: follows the device language by default; the core experience is
@@ -5533,7 +5537,11 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     }] }));
     return true;
   };
-  const stone = (id) => String(id).startsWith("rec") ? id + "@" + Date.now() : id;
+  // Every tombstone carries its timestamp. Plain (unstamped) sf- tombstones
+  // are a retired, poisonous class: mass-written by old purge bugs, they
+  // erased and kept re-erasing the ledger through sync. mergeData scrubs
+  // them; stamped ones (all new deletes) are honored forever.
+  const stone = (id) => id + "@" + Date.now();
   const deleteTxn = (txnId) => {
     const entry = txns.find((t) => t.id === txnId) || txnsRaw.find((t) => t.id === txnId);
     const tomb = stone(txnId);
