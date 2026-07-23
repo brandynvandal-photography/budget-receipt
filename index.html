@@ -1146,7 +1146,7 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
   }
 
   /* ---------- selectors (§4.2 derive, never store) ---------- */
-  function isSpend(t) { return !t.isTransfer; }
+  function isSpend(t) { return !t.isTransfer && !t.billCovered; }
 
   // total non-transfer outflow for a month (refunds are negative -> reduce)
   function monthSpend(txns, month) {
@@ -4636,7 +4636,10 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     const sig = conns.slice().sort().join(",");
     let lastSync = 0, lastSig = "";
     try { lastSync = +localStorage.getItem("stash.relay.lastSync") || 0; lastSig = localStorage.getItem("stash.relay.lastSyncSig") || ""; } catch (e) {}
-    if (sig === lastSig && Date.now() - lastSync < HOUR) return;
+    // No balance anchor (fresh device, post-cleanup) = the Home numbers are
+    // dark until a sync lands — bypass the hourly gate so they heal now.
+    const needAnchor = !(settings.bankAnchor && settings.bankAnchor.cents != null);
+    if (!needAnchor && sig === lastSig && Date.now() - lastSync < HOUR) return;
     try { localStorage.setItem("stash.relay.lastSync", String(Date.now())); localStorage.setItem("stash.relay.lastSyncSig", sig); } catch (e) {}
     let live = true;
     Promise.all(conns.map((cid) => P.fetchTransactions(cid).then((r) => ({ cid, r })).catch(() => ({ cid, r: { transactions: [], balances: [], institutions: [] } }))))
@@ -4773,15 +4776,27 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     // from its label alone — that risks silently dropping a real paycheck).
     // pfc → app category is only a FALLBACK behind merchant matching, which is
     // usually more specific (e.g. a grocery store → gro, not just FOOD_AND_DRINK).
-    const PFC_CAT = { FOOD_AND_DRINK: "dine", TRANSPORTATION: "trans", TRAVEL: "vac", RENT_AND_UTILITIES: "util" };
+    // LOAN_PAYMENTS (card/loan payments) are SPENDING in this app's model —
+    // money that left your life — so they map to bills, not transfer.
+    const PFC_CAT = { FOOD_AND_DRINK: "dine", TRANSPORTATION: "trans", TRAVEL: "vac", RENT_AND_UTILITIES: "util", LOAN_PAYMENTS: "bills" };
     importInbox(inboxNew.map((r) => {
       const pfc = String(r.pfc || "");
-      const xferPfc = /^(TRANSFER_IN|TRANSFER_OUT|LOAN_PAYMENTS)/.test(pfc);
+      const xferPfc = /^(TRANSFER_IN|TRANSFER_OUT)/.test(pfc);
       const xv = (data.xferMap || {})[normXfer(r.label)];
-      const xferLabel = xv ? xv === "transfer" : ((r.kind === "spend" && /\b(transfer|xfer|to savings|to checking|internal transfer|wire transfer|fidelity|vanguard|robinhood|coinbase)\b/i.test(r.label || ""))
-        || (r.kind === "income" && /\b(transfer|xfer)\b/i.test(r.label || "")));
-      const kind = (xferPfc || xferLabel) ? "transfer" : r.kind;
-      const cat = kind === "spend" && R ? (R.guessCategory(r.label, categories, merchantMap) || (categories.some((c) => c.id === PFC_CAT[pfc]) ? PFC_CAT[pfc] : "") || "") : "";
+      // Rules, strongest first: (1) the user's learned classification;
+      // (2) SAVE-hints — round-ups/auto-saves count as OUT but route to the
+      // savings category; (3) SPEND-hints — P2P to people, ATM/withdrawals,
+      // direct-debit/ACH pulls, card payments are spending even when Plaid or
+      // the label says "transfer"; (4) PFC/label transfer detection.
+      const spendHint = /\b(zelle|venmo|cash ?app|paypal|apple cash|pay anyone|pay friends|western union|moneygram|atm|withdrawal|withdraw|cash out|direct debit|ach debit|dda debit|bill ?pay|credit builder|card payment|credit card|secured card)\b/i.test(r.label || "");
+      const saveHint = r.kind === "spend" && /\b(round ?up|save when you get paid|auto ?save)\b/i.test(r.label || "");
+      const isXfer = xv ? xv === "transfer"
+        : (r.kind === "spend"
+          ? (!spendHint && !saveHint && (xferPfc || /\b(transfer|xfer|to savings|to checking|internal transfer|wire transfer|fidelity|vanguard|robinhood|coinbase)\b/i.test(r.label || "")))
+          : (xferPfc || /\b(transfer|xfer)\b/i.test(r.label || "")));
+      const kind = isXfer ? "transfer" : r.kind;
+      const savC = (categories.find((c) => c.class === "SAVING") || {}).id;
+      const cat = kind === "spend" ? (saveHint && savC ? savC : (R && R.guessCategory(r.label, categories, merchantMap) || (categories.some((c) => c.id === PFC_CAT[pfc]) ? PFC_CAT[pfc] : "") || "")) : "";
       return { ...r, kind, categoryId: cat };
     }), []);
   }, [sfBal, inbox, inboxNew, data.sfMap, settings.bankLinks]);
@@ -5027,27 +5042,80 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
     // imported (savings accounts are balance-only) and so can't be paired.
     const IN_XFER = /\b(transfer|xfer)\b/i;
     const OUT_XFER = /\b(transfer|xfer|to savings|to checking|internal transfer|wire transfer|fidelity|vanguard|robinhood|coinbase)\b/i;
+    // Money that LEAVES your life is spending even when the label says
+    // "transfer": P2P payments to other people (Zelle, Venmo, Cash App,
+    // Chime Pay Anyone…), cash leaving via ATM/withdrawal, and merchant
+    // pulls (direct debit / ACH debit / bill pay).
+    const P2P = /\b(zelle|venmo|cash ?app|paypal|apple cash|pay anyone|pay friends|western union|moneygram|atm|withdrawal|withdraw|cash out|direct debit|ach debit|dda debit|bill ?pay|credit builder|card payment|credit card|secured card)\b/i;
+    // Round-ups/auto-saves count as OUT, routed to the savings category.
+    const SAVE_HINT = /\b(round ?up|save when you get paid|auto ?save)\b/i;
     // The user's learned classifications (xferMap) and per-row pins
     // (xferExempt) beat the regexes in BOTH directions.
     const XM = data.xferMap || {};
     inc.forEach((e) => { if (e && e.account && !e.isTransfer && !e.xferExempt && XM[normXfer(e.source)] !== "keep" && (XM[normXfer(e.source)] === "transfer" || IN_XFER.test(e.source || ""))) markI[e.id] = 1; });
-    txs.forEach((t) => { if (t && t.account && !t.isTransfer && !t.xferExempt && XM[normXfer(t.merchant)] !== "keep" && (XM[normXfer(t.merchant)] === "transfer" || OUT_XFER.test(t.merchant || ""))) markT[t.id] = 1; });
+    txs.forEach((t) => { if (t && t.account && !t.isTransfer && !t.xferExempt && !SAVE_HINT.test(t.merchant || "") && XM[normXfer(t.merchant)] !== "keep" && (XM[normXfer(t.merchant)] === "transfer" || (OUT_XFER.test(t.merchant || "") && !P2P.test(t.merchant || "")))) markT[t.id] = 1; });
+    // HEAL pass — rows the OLD rules wrongly excluded: P2P/withdrawal/card
+    // payments un-mark back to spending; round-ups un-mark AND route to the
+    // savings category. The user's explicit "transfer" verdict still wins.
+    const unmarkT = {}, recatT = {};
+    const savCat = (categories.find((c) => c.class === "SAVING") || {}).id;
+    txs.forEach((t) => {
+      if (!t || !t.account || t.xferExempt) return;
+      const lab = t.merchant || "";
+      if (XM[normXfer(lab)] === "transfer") return;
+      const sv = SAVE_HINT.test(lab), sp = P2P.test(lab);
+      if (t.isTransfer && (sv || sp)) unmarkT[t.id] = 1;
+      if (sv && savCat && t.categoryId !== savCat) recatT[t.id] = savCat;
+      else if ((sv || sp) && t.isTransfer && t.categoryId == null && !recatT[t.id]) recatT[t.id] = "gen";
+    });
     // (b) pairing pass — a deposit matching a withdrawal from a DIFFERENT
     // account (same amount, within 3 days) is a move between two imported
     // accounts; both sides marked.
     inc.forEach((e) => {
       if (!e || !e.account || e.isTransfer || e.xferExempt || markI[e.id] || !e.date) return;
       const eTime = new Date(e.date + "T12:00").getTime();
-      const m = txs.find((t) => t && t.account && t.account !== e.account && !t.isTransfer && !t.xferExempt && !markT[t.id] && t.amount === e.amount && t.amount > 0 && t.date && Math.abs(new Date(t.date + "T12:00").getTime() - eTime) <= 3 * 864e5);
+      const m = txs.find((t) => t && t.account && t.account !== e.account && !t.isTransfer && !t.xferExempt && !markT[t.id] && !P2P.test(t.merchant || "") && t.amount === e.amount && t.amount > 0 && t.date && Math.abs(new Date(t.date + "T12:00").getTime() - eTime) <= 3 * 864e5);
       if (m) { markT[m.id] = 1; markI[e.id] = 1; }
     });
-    if (!Object.keys(markT).length && !Object.keys(markI).length) return;
+    if (!Object.keys(markT).length && !Object.keys(markI).length && !Object.keys(unmarkT).length && !Object.keys(recatT).length) return;
     setData((d) => ({
       ...d,
-      txns: d.txns.map((t) => markT[t.id] ? { ...t, isTransfer: 1, categoryId: null } : t),
+      txns: d.txns.map((t) => {
+        if (markT[t.id]) return { ...t, isTransfer: 1, categoryId: null, _m: Date.now() };
+        if (unmarkT[t.id] || recatT[t.id]) return { ...t, ...(unmarkT[t.id] ? { isTransfer: 0 } : {}), ...(recatT[t.id] ? { categoryId: recatT[t.id] } : {}), _m: Date.now() };
+        return t;
+      }),
       income: d.income.map((e) => markI[e.id] ? { ...e, isTransfer: 1 } : e)
     }));
   }, [data.txns, data.income, data.xferMap, setData]);
+  // Plan-bill reconciliation: a recurring bill you configured ("held back
+  // every month") eventually ARRIVES in the bank feed as the real payment —
+  // counting both the plan instance and the bank row doubles the month's
+  // spending. When a bank-tagged, non-transfer spend row in the same month
+  // matches an instance's amount (within $5 or 10%), the instance is marked
+  // covered and stops counting — the bank row (real date, real label) is the
+  // record. One bank row covers at most one instance; if the real payment
+  // never imports (paid from an unconnected account), the plan instance
+  // rightly keeps counting.
+  useEffect(() => {
+    const txs = data.txns || [];
+    const insts = txs.filter((t) => t && String(t.id || "").startsWith("recbill-") && !t.billCovered && t.date && t.amount > 0);
+    if (!insts.length) return;
+    const used = {}, cover = {};
+    insts.forEach((bi) => {
+      const mo = C.monthOf(bi.date);
+      const tol = Math.max(500, Math.round(bi.amount * 0.1));
+      let best = null, bestGap = Infinity;
+      txs.forEach((t) => {
+        if (!t || !t.account || t.isTransfer || t.billCovered || used[t.id] || !t.date || C.monthOf(t.date) !== mo || String(t.id).startsWith("recbill-")) return;
+        const gap = Math.abs(t.amount - bi.amount);
+        if (gap <= tol && gap < bestGap) { best = t; bestGap = gap; }
+      });
+      if (best) { used[best.id] = 1; cover[bi.id] = 1; }
+    });
+    if (!Object.keys(cover).length) return;
+    setData((d) => ({ ...d, txns: (d.txns || []).map((t) => cover[t.id] ? { ...t, billCovered: 1, _m: Date.now() } : t) }));
+  }, [data.txns, setData]);
   // Ask-log reconciliation: a purchase logged from the verdict ("Log it")
   // arrives AGAIN through the bank feed days later, double-counting it. When
   // a bank-tagged twin shows up (same amount, within 4 days), the bank row is
@@ -5848,10 +5916,10 @@ function SimpleHome(p) {
       onClick: () => p.setTab("settings")
     },
     "Set your balance in Settings \u2192"
-  )), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "Left over \xB7 ", monthLabel(month)), /* @__PURE__ */ React.createElement("div", { className: "jarhero" }, /* @__PURE__ */ React.createElement(AnimatedFmt0, { cents: monthNet, className: "bank-val" + (monthNet < 0 ? " overspent" : "") }), /* @__PURE__ */ React.createElement(Jar, { level: leftLevel, size: 30, tint: monthNet < 0 ? "var(--crit)" : void 0, tid: "left" })), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, fmt0(monthIncomeC), " in \xB7 ", fmt0(outC), " out", savedMTD > 0 ? " \xB7 " + fmt0(savedMTD) + " saved" : ""), perDay != null && /* @__PURE__ */ React.createElement("div", { className: "perday" }, "\u2248 ", money(perDay), "/day \xB7 ", daysLeft, "d left")), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "On pace \xB7 ", monthLabel(month)), projectedEnd != null ? /* @__PURE__ */ React.createElement(AnimatedFmt0, { cents: projectedEnd, plus: true, className: "bank-val" + (projectedEnd < 0 ? " overspent" : "") }) : /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "bank-val", style: { opacity: 0.5 } }, "\u2014"), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, "a few days of spending and this shows where ", monthLabel(month), " is headed")))), nextPay && untilPay != null && /* @__PURE__ */ React.createElement("section", { className: "card paypocket", "aria-label": "Spendable until payday" },
+  )), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "Left over \xB7 ", monthLabel(month)), /* @__PURE__ */ React.createElement("div", { className: "jarhero" }, /* @__PURE__ */ React.createElement(AnimatedFmt0, { cents: monthNet, className: "bank-val" + (monthNet < 0 ? " overspent" : "") }), /* @__PURE__ */ React.createElement(Jar, { level: leftLevel, size: 30, tint: monthNet < 0 ? "var(--crit)" : void 0, tid: "left" })), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, fmt0(monthIncomeC), " in \xB7 ", fmt0(outC), " out", savedMTD > 0 ? " \xB7 " + fmt0(savedMTD) + " saved" : ""), perDay != null && /* @__PURE__ */ React.createElement("div", { className: "perday" }, "\u2248 ", money(perDay), "/day \xB7 ", daysLeft, "d left")), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "bub-label" }, "On pace \xB7 ", monthLabel(month)), projectedEnd != null ? /* @__PURE__ */ React.createElement(AnimatedFmt0, { cents: projectedEnd, plus: true, className: "bank-val" + (projectedEnd < 0 ? " overspent" : "") }) : /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "bank-val", style: { opacity: 0.5 } }, "\u2014"), /* @__PURE__ */ React.createElement("div", { className: "bub-cap" }, "a few days of spending and this shows where ", monthLabel(month), " is headed")))), nextPay && /* @__PURE__ */ React.createElement("section", { className: "card paypocket", "aria-label": "Spendable until payday" },
     /* @__PURE__ */ React.createElement("div", null,
-      /* @__PURE__ */ React.createElement("div", { className: "pp-val" }, money(untilPay)),
-      /* @__PURE__ */ React.createElement("div", { className: "pp-cap" }, "to spend before payday", perDayToPay != null && daysToPay > 0 ? " · ≈" + money(perDayToPay) + "/day" : "")),
+      /* @__PURE__ */ React.createElement("div", { className: "pp-val", style: untilPay == null ? { opacity: 0.5 } : null }, untilPay != null ? money(untilPay) : "—"),
+      /* @__PURE__ */ React.createElement("div", { className: "pp-cap" }, untilPay != null ? ["to spend before payday", perDayToPay != null && daysToPay > 0 ? " · ≈" + money(perDayToPay) + "/day" : ""].join("") : "to spend before payday · waiting for your bank's balance…")),
     /* @__PURE__ */ React.createElement("div", { className: "pp-days" }, daysToPay > 0
       ? [/* @__PURE__ */ React.createElement("div", { key: "d", className: "pp-d" }, daysToPay), /* @__PURE__ */ React.createElement("div", { key: "l", className: "pp-dl" }, daysToPay === 1 ? "day" : "days")]
       : /* @__PURE__ */ React.createElement("div", { className: "pp-d" }, "today"))),
@@ -6140,7 +6208,7 @@ function Activity(p) {
   const sortFn = sortBy === "amount"
     ? (a, b) => Math.abs(b.amount) - Math.abs(a.amount)
     : (a, b) => a.date < b.date ? 1 : a.date > b.date ? -1 : 0;
-  const spendList = txns.filter((t) => !t.isTransfer && (showAll || C.monthOf(t.date) === month) && !savingIds[t.categoryId] && matchTx(t)).slice().sort(sortFn);
+  const spendList = txns.filter((t) => !t.isTransfer && !t.billCovered && (showAll || C.monthOf(t.date) === month) && !savingIds[t.categoryId] && matchTx(t)).slice().sort(sortFn);
   const saveList = txns.filter((t) => !t.isTransfer && (showAll || C.monthOf(t.date) === month) && savingIds[t.categoryId] && matchTx(t)).slice().sort(sortFn);
   const incomeList = income.filter((e) => !e.isTransfer && (showAll || C.monthOf(e.date) === month) && matchIn(e)).slice().sort(sortFn);
   // Rows the transfer detector excluded — shown so the user can audit and
