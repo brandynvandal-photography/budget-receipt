@@ -3128,7 +3128,7 @@ const TODAY = todayISO();
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden && todayISO() !== TODAY) location.reload();
 });
-const BUILD_ID = "2026-07-23.25";
+const BUILD_ID = "2026-07-23.26";
 const CURRENT_MONTH = TODAY.slice(0, 7);
 
 /* ---- i18n: follows the device language by default; the core experience is
@@ -3882,6 +3882,33 @@ function LockGate({ lockRec, verify, onUnlock, onForgot, sub }) {
   // cooldown (2s → 4s → … capped 30s). The fail count persists so a reload
   // doesn't reset it. Cleared on success.
   const [cool, setCool] = useState(false);
+  // Native Face ID / Touch ID: after a successful pad unlock the PIN is
+  // escrowed in the iOS Keychain behind biometrics (BioLockPlugin). A
+  // biometric success releases the PIN and runs the exact same verify path,
+  // so the PIN stays the only key. A stale escrow (PIN changed) fails verify
+  // once, clears itself, and the pad takes over.
+  const bio = nativeBioLock();
+  const [bioKind, setBioKind] = useState("");
+  const bioSaved = () => { try { return localStorage.getItem("stash.bio.saved") === "1"; } catch (e) { return false; } };
+  const tryBio = () => {
+    if (!bio || busy) return;
+    bio.load().then((r) => {
+      const secret = (r && r.secret) || "";
+      return Promise.resolve(verify ? verify(secret) : PinLock.verify(secret, lockRec)).then((ok) => {
+        if (ok) { try { localStorage.removeItem("stash.lock.fails"); } catch (e) {} buzz(8); onUnlock && onUnlock(); }
+        else { bio.clear().catch(() => {}); try { localStorage.removeItem("stash.bio.saved"); } catch (e) {} }
+      });
+    }).catch(() => {});
+  };
+  useEffect(() => {
+    if (!bio) return;
+    bio.available().then((r) => {
+      if (r && r.available) {
+        setBioKind(r.biometryType === "touchid" ? "Touch ID" : "Face ID");
+        if (bioSaved()) tryBio();
+      }
+    }).catch(() => {});
+  }, []);
   // auto-check when the 6th digit lands — kept out of the setState updater so
   // it stays pure (and reliable under React's double-invoke).
   useEffect(() => {
@@ -3891,7 +3918,13 @@ function LockGate({ lockRec, verify, onUnlock, onForgot, sub }) {
     Promise.resolve(verify ? verify(pin) : PinLock.verify(pin, lockRec)).then((ok) => {
       if (cancelled) return;
       setBusy(false);
-      if (ok) { try { localStorage.removeItem("stash.lock.fails"); } catch (e) {} buzz(8); onUnlock && onUnlock(); }
+      if (ok) {
+        try { localStorage.removeItem("stash.lock.fails"); } catch (e) {}
+        // pad unlock succeeded on a biometric-capable device: (re)escrow the
+        // PIN so the next unlock can be Face ID / Touch ID
+        if (bio && bioKind) { bio.save({ secret: pin }).then(() => { try { localStorage.setItem("stash.bio.saved", "1"); } catch (e2) {} }).catch(() => {}); }
+        buzz(8); onUnlock && onUnlock();
+      }
       else {
         let f = 1; try { f = (+localStorage.getItem("stash.lock.fails") || 0) + 1; localStorage.setItem("stash.lock.fails", String(f)); } catch (e) {}
         if (f >= 3) { setCool(true); setTimeout(() => setCool(false), Math.min(3e4, 1e3 * Math.pow(2, f - 2))); }
@@ -3921,6 +3954,7 @@ function LockGate({ lockRec, verify, onUnlock, onForgot, sub }) {
     /* @__PURE__ */ React.createElement("div", { className: "lock-dots" + (err ? " shake" : "") }, Array.from({ length: LOCK_LEN }).map((_, i) => /* @__PURE__ */ React.createElement("span", { key: i, className: "lock-dot" + (i < pin.length ? " on" : "") + (err ? " err" : "") }))),
     /* @__PURE__ */ React.createElement("div", { className: "lock-sub", role: "status", "aria-live": "polite", style: { minHeight: "1.2em" } }, cool ? "Too many tries — hold on a moment…" : err ? "Wrong PIN — try again." : ""),
     /* @__PURE__ */ React.createElement("div", { className: "lock-pad" }, keys.map((k, i) => k === "" ? /* @__PURE__ */ React.createElement("span", { key: i }) : /* @__PURE__ */ React.createElement("button", { key: i, className: "lock-key" + (k === "⌫" ? " ghost" : ""), onClick: k === "⌫" ? back : () => push(k), disabled: busy, "aria-label": k === "⌫" ? "Delete" : k }, k))),
+    bioKind && bioSaved() && !wipe && /* @__PURE__ */ React.createElement("button", { className: "lock-link", onClick: tryBio, disabled: busy }, "Unlock with " + bioKind),
     wipe
       ? /* @__PURE__ */ React.createElement("div", { className: "lock-forgot" }, /* @__PURE__ */ React.createElement("div", { className: "lock-warn" }, tr("lock_erase_q")), /* @__PURE__ */ React.createElement("div", { className: "lock-forgot-row" }, /* @__PURE__ */ React.createElement("button", { className: "btn quiet", onClick: () => setWipe(false) }, tr("btn_cancel")), /* @__PURE__ */ React.createElement("button", { className: "btn danger-quiet", onClick: onForgot }, tr("lock_erase"))))
       : /* @__PURE__ */ React.createElement("button", { className: "lock-link", onClick: () => setWipe(true) }, tr("lock_forgot")));
@@ -4047,6 +4081,15 @@ function nativePlaidBridge() {
   try {
     const C = window.Capacitor;
     if (C && C.isNativePlatform && C.isNativePlatform() && C.Plugins && C.Plugins.PlaidLink) return C.Plugins.PlaidLink;
+  } catch (e) {}
+  return null;
+}
+// Native biometric escrow (iOS Keychain behind Face ID / Touch ID). The PIN
+// remains the only key — biometrics just release it. See BioLockPlugin.swift.
+function nativeBioLock() {
+  try {
+    const C = window.Capacitor;
+    if (C && C.isNativePlatform && C.isNativePlatform() && C.Plugins && C.Plugins.BioLock) return C.Plugins.BioLock;
   } catch (e) {}
   return null;
 }
@@ -4203,7 +4246,9 @@ function BankConnect({ settings, setSetting, disconnectBank }) {
   const passPanel = passNeeded ? /* @__PURE__ */ React.createElement("div", { className: "card", style: { padding: "14px 16px", margin: "10px 0" } },
     /* @__PURE__ */ React.createElement("div", { style: { fontWeight: 700, marginBottom: 4 } }, "Plaid Pass needed"),
     /* @__PURE__ */ React.createElement("div", { className: "hint", style: { marginTop: 0, marginBottom: 8 } }, "Plaid charges us for every connected bank, so Plaid links use an at-cost pass. SimpleFIN connections stay free. Enter your access code:"),
-    /* @__PURE__ */ React.createElement("div", { className: "hint", style: { marginTop: 0, marginBottom: 10 } }, "Don't have one? ", /* @__PURE__ */ React.createElement("a", { href: "https://inmystash.com/pass", target: "_blank", rel: "noopener" }, "Get a Plaid Pass — $2/mo"), " — your code appears right after checkout."),
+    // App Store guideline 3.1.1: the native app may ACCEPT codes purchased
+    // elsewhere but must not link out to buy one — so the buy line is web-only.
+    !nativePlaidBridge() && /* @__PURE__ */ React.createElement("div", { className: "hint", style: { marginTop: 0, marginBottom: 10 } }, "Don't have one? ", /* @__PURE__ */ React.createElement("a", { href: "https://inmystash.com/pass", target: "_blank", rel: "noopener" }, "Get a Plaid Pass — $2/mo"), " — your code appears right after checkout."),
     /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 8 } },
       /* @__PURE__ */ React.createElement("input", { className: "lk-input", style: { letterSpacing: "normal", textAlign: "left", flex: 1 }, placeholder: "Access code", value: passCode, onChange: (e) => setPassCode(e.target.value) }),
       /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: redeemPass, disabled: !passCode.trim() }, "Redeem"))) : null;
