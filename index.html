@@ -3128,7 +3128,7 @@ const TODAY = todayISO();
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden && todayISO() !== TODAY) location.reload();
 });
-const BUILD_ID = "2026-07-23.27";
+const BUILD_ID = "2026-07-23.28";
 const CURRENT_MONTH = TODAY.slice(0, 7);
 
 /* ---- i18n: follows the device language by default; the core experience is
@@ -3153,7 +3153,7 @@ const STRINGS = {
     ob_priv3: "Nothing is sold or shared. Export or erase it all, anytime.",
     ob_priv4: "In My Stash is a decision tool — not licensed financial advice.",
     ob_read_privacy: "Read our full privacy policy →",
-    ob_iunderstand: "I understand", ob_basics_h: "Two quick basics",
+    ob_iunderstand: "I understand", ob_basics_h: "Your money basics",
     ob_ready_h: "You're all set", ob_start: "Start using In My Stash",
     ob_bank_eyebrow: "Optional", ob_bank_h: "Connect a bank",
     ob_bank_p: "So your spending and deposits track themselves automatically, from what's really in your accounts.",
@@ -3181,7 +3181,7 @@ const STRINGS = {
     ob_priv2: "Las copias están cifradas de extremo a extremo. No podemos leerlas.",
     ob_priv3: "Nada se vende ni se comparte. Exporta o borra todo cuando quieras.",
     ob_priv4: "In My Stash es una herramienta de decisión, no asesoría financiera.",
-    ob_iunderstand: "Entiendo", ob_basics_h: "Dos datos rápidos",
+    ob_iunderstand: "Entiendo", ob_basics_h: "Lo básico de tu dinero",
     ob_ready_h: "¡Todo listo!", ob_start: "Empezar a usar In My Stash",
     set_language: "Idioma", set_language_system: "Predeterminado del sistema"
   },
@@ -3200,7 +3200,7 @@ const STRINGS = {
     ob_priv2: "备份采用端到端加密，我们无法读取。",
     ob_priv3: "绝不出售或分享。随时可导出或全部清除。",
     ob_priv4: "In My Stash 是决策工具，并非持牌理财建议。",
-    ob_iunderstand: "我明白了", ob_basics_h: "两个小设置",
+    ob_iunderstand: "我明白了", ob_basics_h: "你的资金基本设置",
     ob_ready_h: "都设置好了", ob_start: "开始使用 In My Stash",
     set_language: "语言", set_language_system: "跟随系统"
   },
@@ -3219,7 +3219,7 @@ const STRINGS = {
     ob_priv2: "Bản sao lưu được mã hóa đầu-cuối. Chúng tôi không đọc được.",
     ob_priv3: "Không bán hay chia sẻ. Xuất hoặc xóa hết bất cứ lúc nào.",
     ob_priv4: "In My Stash là công cụ hỗ trợ quyết định, không phải tư vấn tài chính.",
-    ob_iunderstand: "Tôi hiểu", ob_basics_h: "Hai thông tin nhanh",
+    ob_iunderstand: "Tôi hiểu", ob_basics_h: "Cơ bản về tiền của bạn",
     ob_ready_h: "Xong rồi!", ob_start: "Bắt đầu dùng In My Stash",
     set_language: "Ngôn ngữ", set_language_system: "Theo hệ thống"
   },
@@ -3238,7 +3238,7 @@ const STRINGS = {
     ob_priv2: "Naka-end-to-end encrypt ang backup. Hindi namin ito mababasa.",
     ob_priv3: "Walang ibinebenta o ibinabahagi. Puwedeng i-export o burahin anumang oras.",
     ob_priv4: "Ang In My Stash ay tool sa pagdedesisyon, hindi lisensyadong payo sa pera.",
-    ob_iunderstand: "Naiintindihan ko", ob_basics_h: "Dalawang mabilis",
+    ob_iunderstand: "Naiintindihan ko", ob_basics_h: "Mga basics ng pera mo",
     ob_ready_h: "Handa ka na!", ob_start: "Simulan ang In My Stash",
     set_language: "Wika", set_language_system: "Depende sa system"
   },
@@ -3257,7 +3257,7 @@ const STRINGS = {
     ob_priv2: "백업은 종단 간 암호화돼요. 우리도 못 읽어요.",
     ob_priv3: "판매하거나 공유하지 않아요. 언제든 내보내거나 전부 지울 수 있어요.",
     ob_priv4: "In My Stash는 결정 도구예요 — 공인 금융 자문이 아니에요.",
-    ob_iunderstand: "이해했어요", ob_basics_h: "간단한 두 가지",
+    ob_iunderstand: "이해했어요", ob_basics_h: "내 돈 기본 설정",
     ob_ready_h: "준비 완료!", ob_start: "In My Stash 시작하기",
     set_language: "언어", set_language_system: "시스템 기본값"
   }
@@ -4395,7 +4395,7 @@ function Onboarding({ settings, setSetting, setTab }) {
   } else if (step === 3) {
     body = /* @__PURE__ */ React.createElement("div", { className: "ob-card" },
       /* @__PURE__ */ React.createElement("h1", { className: "ob-h" }, tr("ob_basics_h")),
-      /* @__PURE__ */ React.createElement("p", { className: "ob-p" }, "Both optional — change them anytime in Settings."),
+      /* @__PURE__ */ React.createElement("p", { className: "ob-p" }, "All optional — change anything later in Settings."),
       /* @__PURE__ */ React.createElement("div", { className: "ob-fields" },
         /* @__PURE__ */ React.createElement("div", { className: "ob-field" }, /* @__PURE__ */ React.createElement("label", null, "How does money come in?", /* @__PURE__ */ React.createElement("span", { className: "f-sub" }, "This sets how In My Stash paces your answers.")),
           /* @__PURE__ */ React.createElement("div", { className: "seg", role: "group", "aria-label": "How does money come in?", style: { marginTop: 6 } },
