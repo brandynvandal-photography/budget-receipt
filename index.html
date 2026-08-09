@@ -46,7 +46,7 @@ html,body{margin:0;background:var(--page);color:var(--ink);
 button,input,select{font-family:inherit;font-size:inherit;color:inherit}
 .boot{padding:48px 16px;text-align:center;color:var(--muted)}
 
-.shell{max-width:480px;margin:0 auto;min-height:100vh;padding:0 16px 96px}
+.shell{max-width:480px;margin:0 auto;min-height:100vh;padding:0 16px calc(104px + env(safe-area-inset-bottom,0px))}
 
 /* header: tiny receipt nod + month picker */
 .top{display:flex;justify-content:space-between;align-items:center;padding:14px 0 4px}
@@ -149,7 +149,7 @@ h2.screen-title{font-size:22px;font-weight:700;margin:14px 0 2px}
 .uncat .catpick{border-color:var(--warn);color:var(--ink);font-weight:600}
 
 /* add form */
-.addbtn{position:fixed;right:max(16px, calc(50% - 224px));bottom:86px;width:54px;height:54px;border-radius:50%;
+.addbtn{position:fixed;right:max(16px, calc(50% - 224px));bottom:calc(96px + env(safe-area-inset-bottom,0px));width:54px;height:54px;border-radius:50%;
   background:var(--accent);color:#fff;border:none;font-size:28px;font-weight:400;line-height:1;
   box-shadow:0 4px 14px rgba(0,0,0,.22);cursor:pointer;z-index:30}
 .sheet-bg{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:40}
@@ -189,15 +189,22 @@ h2.screen-title{font-size:22px;font-weight:700;margin:14px 0 2px}
 .selfcheck{font-size:14px;margin-top:8px}
 .selfcheck .fails{color:var(--crit);font-size:12.5px;white-space:pre-wrap}
 
-/* bottom tab bar */
-.tabbar{position:fixed;left:0;right:0;bottom:0;z-index:20;background:var(--surface);
-  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-top:1px solid var(--ring)}
-.tabbar-inner{max-width:480px;margin:0 auto;display:flex;padding:6px 8px calc(8px + env(safe-area-inset-bottom))}
+/* bottom tab bar — floating Liquid-Glass pill (iOS 26 style). Falls back to a
+   solid surface under Reduce Transparency (rule further down strips the blur). */
+.tabbar{position:fixed;left:14px;right:14px;bottom:calc(10px + env(safe-area-inset-bottom,0px));z-index:20;
+  max-width:440px;margin:0 auto;border-radius:999px;
+  background:color-mix(in srgb, var(--surface) 74%, transparent);
+  backdrop-filter:blur(22px) saturate(1.8);-webkit-backdrop-filter:blur(22px) saturate(1.8);
+  border:1px solid color-mix(in srgb, var(--ring) 70%, transparent);
+  box-shadow:0 10px 30px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.10)}
+.tabbar-inner{display:flex;padding:5px 6px;gap:2px}
 .tb{flex:1;background:none;border:none;display:flex;flex-direction:column;align-items:center;gap:2px;
-  padding:6px 0 2px;cursor:pointer;color:var(--muted);position:relative}
+  padding:7px 0 5px;cursor:pointer;color:var(--muted);position:relative;border-radius:999px;
+  transition:background .18s ease,color .18s ease}
 .tb .tb-ic{font-size:20px;line-height:1}
 .tb .tb-label{font-size:10.5px;font-weight:600}
-.tb.on{color:var(--accent)}
+.tb.on{color:var(--accent);background:color-mix(in srgb, var(--accent) 14%, transparent)}
+@media (prefers-reduced-motion: reduce){ .tb{transition:none} }
 .tb .dot{position:absolute;top:2px;right:calc(50% - 16px);width:8px;height:8px;border-radius:50%;
   background:var(--warn);border:2px solid var(--surface)}
 
@@ -403,7 +410,7 @@ body{background:linear-gradient(180deg,#16413a 0px,#10302b 300px,#0a1614 680px) 
 .tx-merch{color:var(--ink)}.tx-amt{color:var(--ink)}
 .tx-amt.refund,.s-amt.pos-amt{color:var(--good-text)}
 .catpick,.recat{background:var(--surface);border-color:var(--grid);color:var(--ink2)}
-.tabbar{background:rgba(8,18,16,.94);border-top:1px solid var(--grid)}
+.tabbar{background:rgba(8,18,16,.60);border:1px solid rgba(255,255,255,.10)}
 .tb{color:var(--muted)} .tb.on{color:var(--accent)}
 .addbtn{background:linear-gradient(135deg,#5ceab5 0%,#2fc98f 100%);color:#062018;
   border-radius:20px;box-shadow:0 6px 18px rgba(69,224,166,.28)}
@@ -516,7 +523,7 @@ body{background:linear-gradient(180deg,#16413a 0px,#10302b 300px,#0a1614 680px) 
 
 /* FAB speed-dial (long-press) */
 .fan-bg{position:fixed;inset:0;z-index:29}
-.fan{position:fixed;right:max(16px, calc(50% - 224px));bottom:152px;display:flex;
+.fan{position:fixed;right:max(16px, calc(50% - 224px));bottom:calc(162px + env(safe-area-inset-bottom,0px));display:flex;
   flex-direction:column;gap:9px;align-items:flex-end;z-index:30}
 .fan-item{display:flex;align-items:center;gap:8px;border:1px solid var(--grid);border-radius:999px;
   padding:11px 16px;font-size:14px;font-weight:700;background:var(--surface);color:var(--ink);
@@ -735,7 +742,7 @@ button:focus-visible,a:focus-visible,select:focus-visible,input:focus-visible,la
 .jarcol.neg.on{background:rgba(255,143,143,.1)}
 /* iOS "liquid glass": translucent, backdrop-blurred surfaces with a light top edge */
 @supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
-  .tabbar{background:color-mix(in srgb, var(--surface) 66%, transparent);-webkit-backdrop-filter:blur(26px) saturate(1.6);backdrop-filter:blur(26px) saturate(1.6);border-top:1px solid rgba(255,255,255,.08);box-shadow:inset 0 1px 0 rgba(255,255,255,.07)}
+  .tabbar{background:color-mix(in srgb, var(--surface) 62%, transparent);-webkit-backdrop-filter:blur(26px) saturate(1.7);backdrop-filter:blur(26px) saturate(1.7);border:1px solid rgba(255,255,255,.12);box-shadow:0 10px 30px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.10)}
   .sheet{background:color-mix(in srgb, var(--surface) 80%, transparent);-webkit-backdrop-filter:blur(32px) saturate(1.6);backdrop-filter:blur(32px) saturate(1.6);box-shadow:inset 0 1px 0 rgba(255,255,255,.09), 0 -10px 44px rgba(0,0,0,.45)}
   .lockgate,.onboard{background:color-mix(in srgb, var(--page) 78%, transparent);-webkit-backdrop-filter:blur(28px);backdrop-filter:blur(28px)}
   .card{background:color-mix(in srgb, var(--surface) 74%, transparent);-webkit-backdrop-filter:blur(14px) saturate(1.25);backdrop-filter:blur(14px) saturate(1.25);box-shadow:inset 0 1px 0 rgba(255,255,255,.05)}
@@ -3128,7 +3135,7 @@ const TODAY = todayISO();
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden && todayISO() !== TODAY) location.reload();
 });
-const BUILD_ID = "2026-07-23.28";
+const BUILD_ID = "2026-07-23.29";
 const CURRENT_MONTH = TODAY.slice(0, 7);
 
 /* ---- i18n: follows the device language by default; the core experience is
@@ -4731,6 +4738,46 @@ function Main({ data, setData, tab, setTab, rev, setRev, syncCfg, setSyncCfg, sy
       });
       h.open();
     }).catch(done);
+  }, []);
+  // Swipe side-to-side anywhere on a screen to move between the four tabs
+  // (Home ⇄ Activity ⇄ Trends ⇄ Settings). Deliberately conservative so it
+  // never fights something else that owns horizontal touch: starts within
+  // 28px of a screen edge are left to iOS back/forward gestures, and touches
+  // that begin inside inputs, sheets, or any horizontally-swiping widget
+  // (bubble Swiper, row swipe-to-delete, pickers) are ignored. Fires only on
+  // a quick, clearly-horizontal flick — scrolling wins every tie.
+  const swipeTabRef = useRef(tab);
+  useEffect(() => { swipeTabRef.current = tab; }, [tab]);
+  useEffect(() => {
+    const order = ["home", "activity", "trends", "settings"];
+    const skip = "input,textarea,select,.swiper,.swipe-track,.swipe-wrap,.sheet,.billprompt-scrim,.lockgate,.bank-pick-grid,.fan,.actbar";
+    let sx = 0, sy = 0, t0 = 0, live = false;
+    const onStart = (e) => {
+      live = false;
+      if (!e.touches || e.touches.length !== 1) return;
+      const t = e.touches[0];
+      if (t.clientX < 28 || t.clientX > window.innerWidth - 28) return;
+      if (e.target && e.target.closest && e.target.closest(skip)) return;
+      sx = t.clientX; sy = t.clientY; t0 = Date.now(); live = true;
+    };
+    const onEnd = (e) => {
+      if (!live) return;
+      live = false;
+      const t = e.changedTouches && e.changedTouches[0];
+      if (!t || Date.now() - t0 > 600) return;
+      const dx = t.clientX - sx, dy = t.clientY - sy;
+      if (Math.abs(dx) < 64 || Math.abs(dx) < Math.abs(dy) * 2) return;
+      const i = order.indexOf(swipeTabRef.current);
+      if (i < 0) return;
+      const next = order[i + (dx < 0 ? 1 : -1)];
+      if (next) { buzz(6); setTab(next); }
+    };
+    window.addEventListener("touchstart", onStart, { passive: true });
+    window.addEventListener("touchend", onEnd, { passive: true });
+    return () => {
+      window.removeEventListener("touchstart", onStart);
+      window.removeEventListener("touchend", onEnd);
+    };
   }, []);
   // Reconcile connections against the relay: the server (KV) is the source of
   // truth for which relay banks are linked. On load we rebuild the simplefin/
