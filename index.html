@@ -1,6 +1,18 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+<style id="boot-critical">
+  html,body{margin:0;background:#0d0d0d}
+  #boot-splash{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;
+    justify-content:center;gap:18px;background:#0d0d0d;z-index:99999;
+    font:600 15px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#8ba39a}
+  #boot-splash .bs-mark{font-weight:800;font-size:26px;letter-spacing:-.02em;color:#f2f6f4}
+  #boot-splash .bs-mark span{color:#45e0a6}
+  #boot-splash .bs-dot{width:26px;height:26px;border-radius:50%;
+    border:2.5px solid rgba(69,224,166,.25);border-top-color:#45e0a6;animation:bs-spin .8s linear infinite}
+  @keyframes bs-spin{to{transform:rotate(360deg)}}
+  @media (prefers-reduced-motion: reduce){#boot-splash .bs-dot{animation:none;border-top-color:rgba(69,224,166,.25)}}
+</style>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -857,7 +869,8 @@ button:focus-visible,a:focus-visible,select:focus-visible,input:focus-visible,la
 </style>
 </head>
 <body>
-<div id="root"><div class="boot mono">opening In My Stash…</div></div>
+<div id="root"></div>
+<div id="boot-splash" aria-hidden="true"><div class="bs-mark">inmy<span>stash.</span></div><div class="bs-dot"></div></div>
 <script>/* React 18 (UMD, inlined — fully offline) */
 /**
  * @license React
@@ -3164,7 +3177,7 @@ const TODAY = todayISO();
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden && todayISO() !== TODAY) location.reload();
 });
-const BUILD_ID = "2026-07-23.35";
+const BUILD_ID = "2026-07-23.36";
 const CURRENT_MONTH = TODAY.slice(0, 7);
 
 /* ---- i18n: follows the device language by default; the core experience is
@@ -7199,9 +7212,22 @@ function Settings(p) {
     check && /* @__PURE__ */ React.createElement("div", { className: "selfcheck" }, check.fail === 0 ? /* @__PURE__ */ React.createElement("span", { className: "tag ok" }, "\u2713 all ", check.pass, " checks passed") : /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("span", { className: "tag over" }, "\u2715 ", check.fail, " failed"), /* @__PURE__ */ React.createElement("div", { className: "fails" }, check.log.filter((l) => l[0] === "fail").map((l) => l[1]).join("\n"))))
   ), /* @__PURE__ */ React.createElement(Acc, { title: "App lock", cap: settings.lock && settings.lock.enabled ? "On · 6-digit PIN" : "Off" }, /* @__PURE__ */ React.createElement(LockSetup, { settings, setSetting, data }))), /* @__PURE__ */ React.createElement(Acc, { title: "App", cap: "language \u00b7 text size \u00b7 about" }, /* @__PURE__ */ React.createElement(Acc, { title: "App & data", cap: "build " + BUILD_ID }, /* @__PURE__ */ React.createElement("div", { className: "lock-row", style: { marginTop: 0, marginBottom: 10 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 16, fontWeight: 700, letterSpacing: "-.01em", color: "var(--ink)" } }, tr("set_language")), /* @__PURE__ */ React.createElement("select", { value: settings.lang || "system", onChange: (e) => setSetting("lang", e.target.value), "aria-label": tr("set_language") }, /* @__PURE__ */ React.createElement("option", { value: "system" }, tr("set_language_system")), Object.keys(LANG_NAMES).map((code) => /* @__PURE__ */ React.createElement("option", { key: code, value: code }, LANG_NAMES[code])))), /* @__PURE__ */ React.createElement("div", { className: "lock-row", style: { marginTop: 0, marginBottom: 10 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 16, fontWeight: 700, letterSpacing: "-.01em", color: "var(--ink)" } }, "Text size"), /* @__PURE__ */ React.createElement("select", { value: String(settings.uiScale || 1), onChange: (e) => setSetting("uiScale", +e.target.value), "aria-label": "Text size" }, /* @__PURE__ */ React.createElement("option", { value: "1" }, "Default"), /* @__PURE__ */ React.createElement("option", { value: "1.15" }, "Large"), /* @__PURE__ */ React.createElement("option", { value: "1.3" }, "Largest")))), /* @__PURE__ */ React.createElement(Acc, { title: "About" }, /* @__PURE__ */ React.createElement("div", { className: "sub", style: { marginTop: 0 } }, "In My Stash is a decision-support tool, not licensed financial advice. Money is stored as exact cents; totals are always recomputed from your transactions, never stored."), /* @__PURE__ */ React.createElement("div", { className: "about-links" }, /* @__PURE__ */ React.createElement("a", { href: "https://inmystash.com/pricing", target: "_blank", rel: "noopener" }, "Pricing"), !nativePlaidBridge() && /* @__PURE__ */ React.createElement("a", { href: "https://inmystash.com/support", target: "_blank", rel: "noopener" }, "\u2665 Keep it free"), /* @__PURE__ */ React.createElement("a", { href: "https://inmystash.com/privacy", target: "_blank", rel: "noopener" }, "Privacy Policy"), /* @__PURE__ */ React.createElement("a", { href: "https://inmystash.com/terms", target: "_blank", rel: "noopener" }, "Terms"), /* @__PURE__ */ React.createElement("a", { href: "https://inmystash.com/security-whitepaper", target: "_blank", rel: "noopener" }, "Security")))), (STORE.corrupted || STORE.saveFailed) && /* @__PURE__ */ React.createElement("div", { className: "footnote" }, STORE.corrupted ? "\u26A0 previous save was unreadable \u2014 a backup copy was kept" : "\u26A0 saving to this browser failed \u2014 use Export to keep your data"));
 }
-ReactDOM.createRoot(document.getElementById("root")).render(
-  /* @__PURE__ */ React.createElement(Boundary, null, /* @__PURE__ */ React.createElement(App, null))
-);
+var __booted = false;
+function __bootMount(){
+  if (__booted) return; __booted = true;
+  ReactDOM.createRoot(document.getElementById("root")).render(
+    /* @__PURE__ */ React.createElement(Boundary, null, /* @__PURE__ */ React.createElement(App, null))
+  );
+  var lift = function(){ var el = document.getElementById("boot-splash"); if (!el) return; el.style.transition = "opacity .28s ease"; el.style.opacity = "0"; setTimeout(function(){ el && el.remove(); }, 300); };
+  requestAnimationFrame(function(){ requestAnimationFrame(lift); });
+  setTimeout(lift, 4000);
+}
+// Let the static branded splash paint first (killing the cold-launch black
+// screen + WebKit unpainted-view blank), THEN run the heavy first render.
+// Two RAFs order it after paint; a setTimeout guarantees the mount even when
+// RAF is throttled (hidden/backgrounded launch), whichever fires first wins.
+requestAnimationFrame(function(){ requestAnimationFrame(__bootMount); });
+setTimeout(__bootMount, 250);
 
 </script>
 <script>
